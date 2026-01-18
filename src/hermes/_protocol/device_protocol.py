@@ -1,7 +1,7 @@
 from typing import Protocol
 
 from ..models.language import Language
-from .debug_bridge import DebugBridgeProtocol
+from .debug_bridge_protocol import DebugBridgeProtocol
 from .driver_protocol import DriverProtocol
 
 

@@ -1,6 +1,6 @@
 from appium.webdriver.webdriver import WebDriver
 
-from .._protocol.debug_bridge import DebugBridgeProtocol
+from .._protocol.debug_bridge_protocol import DebugBridgeProtocol
 from .._protocol.device_protocol import DeviceProtocol
 from .._protocol.driver_protocol import DriverProtocol
 from ..models.device import AndroidDeviceAppiumModel, AndroidDeviceU2Model, DriverType

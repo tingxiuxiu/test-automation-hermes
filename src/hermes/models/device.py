@@ -1,4 +1,5 @@
 from enum import Enum
+from uuid import uuid4
 
 from pydantic import BaseModel
 
@@ -29,7 +30,7 @@ class BaseDeviceModel(BaseModel):
     name: str
     language: Language = Language.CHINESE
     timeout: int = 8000
-    tag: str | None = None
+    tag: str = uuid4().hex
 
 
 class AndroidDeviceAppiumModel(BaseDeviceModel):

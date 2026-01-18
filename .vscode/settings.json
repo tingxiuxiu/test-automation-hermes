@@ -3,7 +3,7 @@
   "python.analysis.extraPaths": ["${workspaceFolder}/src"],
   "python.testing.pytestEnabled": true,
   "python.testing.pytestArgs": ["${workspaceFolder}/tests"],
-  "python.languageServer": "Pylance",
+  // "python.languageServer": "Pylance",
 
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit"
