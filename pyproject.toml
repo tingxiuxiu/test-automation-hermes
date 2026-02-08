@@ -1,0 +1,62 @@
+[project]
+name = "test-automation-hermes"
+dynamic = ["version"]
+description = "Test automation framework"
+authors = [
+    {name = "xin.zhang", email = "112859811@qq.com"},
+]
+dependencies = ["pydantic>=2.12.5", "pydantic-settings>=2.12.0", "loguru>=0.7.3", "pytest>=9.0.2", "httpx>=0.28.1", "appium-python-client>=5.2.4"]
+requires-python = ">=3.14"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[tool.pdm]
+version = { source = "file", path = "src/hermes/__init__.py" }
+distribution = true
+
+[tool.pdm.build]
+package-dir = "src"
+includes = ["src/hermes"]
+excludes = ["./tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # pyflakes
+    "I",  # isort
+    "B",  # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # line too long, handled by black
+    "B008",  # do not perform function calls in argument defaults
+    "C901",  # too complex
+    "W191",  # indentation contains tabs
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-third-party = ["hermes", "pydantic"]
+
+[tool.ruff.lint.pyupgrade]
+# Preserve types, even if a file imports `from __future__ import annotations`.
+keep-runtime-typing = true
+
+[tool.pyright]
+include = ["src", "tests"]
+exclude = [".venv", ".git"]
+venv = ".venv"
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+]
