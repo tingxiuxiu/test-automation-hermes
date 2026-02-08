@@ -1,12 +1,12 @@
 [project]
 name = "test-automation-hermes"
-dynamic = ["version"]
+version = "0.0.1"
 description = "Test automation framework"
 authors = [
     {name = "xin.zhang", email = "112859811@qq.com"},
 ]
-dependencies = ["pydantic>=2.12.5", "pydantic-settings>=2.12.0", "loguru>=0.7.3", "pytest>=9.0.2", "httpx>=0.28.1", "appium-python-client>=5.2.4"]
-requires-python = ">=3.14"
+dependencies = ["pydantic>=2.12.5", "pydantic-settings>=2.12.0", "loguru>=0.7.3", "pytest>=9.0.2", "httpx>=0.28.1", "elementpath>=5.1.1", "opencv-python>=4.13.0.90"]
+requires-python = ">=3.12"
 readme = "README.md"
 license = {text = "MIT"}
 
@@ -14,10 +14,12 @@ license = {text = "MIT"}
 requires = ["pdm-backend"]
 build-backend = "pdm.backend"
 
-
 [tool.pdm]
-version = { source = "file", path = "src/hermes/__init__.py" }
 distribution = true
+
+[[tool.pdm.source]]
+name = "pypi"
+url = "https://mirrors.huaweicloud.com/repository/pypi/simple"
 
 [tool.pdm.build]
 package-dir = "src"
