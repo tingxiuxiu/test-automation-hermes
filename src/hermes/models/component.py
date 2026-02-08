@@ -11,17 +11,15 @@ class Point(BaseModel):
     y: int
 
 
-class Box(BaseModel):
+class Bounds(BaseModel):
     left: int
     top: int
     right: int
     bottom: int
-    width: int
-    height: int
 
 
-class Component(BaseModel):
-    name: str
+class ImageModal(BaseModel):
+    tag: str
     size: Size
-    point: Point
-    box: Box
+    center: Point
+    bounds: Bounds

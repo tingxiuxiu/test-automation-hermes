@@ -1,105 +1,133 @@
-from appium.webdriver.webdriver import WebDriver
+import re
+import time
 
-from .._protocol.debug_bridge_protocol import DebugBridgeProtocol
-from .._protocol.device_protocol import DeviceProtocol
-from .._protocol.driver_protocol import DriverProtocol
-from ..models.device import AndroidDeviceAppiumModel, AndroidDeviceU2Model, DriverType
+import httpx
+
+from loguru import logger
+
+from ..protocol.debug_bridge_protocol import DebugBridgeProtocol
+from ..protocol.device_protocol import DeviceProtocol
+from ..protocol.driver_protocol import DriverProtocol
+from ..models.device import AndroidDeviceModel
 from ..models.language import Language
 from .android_driver import AndroidDriver
+from .android_adb import AndroidADB
+from .._core import config, hermes_cache
+from .._core.portal_protocol import PortalContent, PortalHTTP
 
 
 class AndroidDevice(DeviceProtocol):
-    def __init__(self, device_model: AndroidDeviceAppiumModel | AndroidDeviceU2Model):
+    def __init__(self, device_model: AndroidDeviceModel):
         if device_model.serial == "":
             raise ValueError("serial can not be empty string")
         self._device_model = device_model
-        if isinstance(device_model, AndroidDeviceAppiumModel):
-            self._initial_driver: WebDriver | None = None
-            self._driver_type = DriverType.APPIUM
-        else:
-            self._initial_driver = None
-            self._driver_type = DriverType.U2
         self._driver: DriverProtocol | None = None
         self._language = device_model.language
-
-    @property
-    def device_model(self):
-        return self._device_model
-
-    def _set_appium(self):
-        if not isinstance(self._device_model, AndroidDeviceAppiumModel):
-            raise ValueError("device model is not AndroidDeviceAppiumModel")
-        from appium.options.android.uiautomator2.base import UiAutomator2Options
-        from appium.webdriver.client_config import AppiumClientConfig
-
-        desire_caps = {
-            "platformName": self._device_model.platform_name.value,
-            "automationName": self._device_model.automation_name.value,
-            "appPackage": self._device_model.app_package,
-            "appActivity": self._device_model.app_activity,
-            "androidHome": self._device_model.android_home,
-            "newCommandTimeout": 60,
-            "adbExecTimeout": 60,
-            "waitForIdleTimeout": 200,
-            "noReset": self._device_model.no_reset,
-        }
-        client_config = AppiumClientConfig(
-            remote_server_addr=self._device_model.appium_host,
-            direct_connection=True,
-            keep_alive=True,
-            ignore_certificates=True,
+        self._adb = AndroidADB(
+            serial=device_model.serial,
+            android_home=device_model.android_home,
+            capture_logcat=device_model.capture_logcat,
         )
-        options = UiAutomator2Options().load_capabilities(desire_caps)
-        return options, client_config
+        self._timeout = device_model.timeout
+        self._port: int = hermes_cache.get_portal_port()
+        self._base_url: str = f"http://127.0.0.1:{self._port}"
+        self._client: httpx.Client = httpx.Client(timeout=3)
+
+    def __del__(self):
+        self._client.close()
 
     @property
-    def inital_driver(self) -> WebDriver:
-        if not self._initial_driver:
-            raise ValueError("driver is not initialized")
-        return self._initial_driver
+    def device_model(self) -> AndroidDeviceModel:
+        return self._device_model
 
     def set_language(self, language: Language):
         self._language = language
 
+    def set_implicitly_wait(self, timeout: int):
+        self._timeout = timeout
+
     def connect(self):
         if self._driver:
             return
-        if isinstance(self._device_model, AndroidDeviceAppiumModel):
-            options, client_config = self._set_appium()
-            self._initial_driver = WebDriver(
-                command_executor=client_config.remote_server_addr,
-                options=options,
-                client_config=client_config,
-            )
-            self._driver = AndroidDriver(
-                driver=self._initial_driver,
-                name=self._device_model.name,
-                language=self._language,
-                timeout=self._device_model.timeout,
-            )
+        self._setup_portal(self._port)
+        if not self.ping():
+            raise ConnectionError("Portal server not responsive")
+        self._adb.click_home()
+        self._driver = AndroidDriver(
+            adb=self._adb,
+            base_url=self._base_url,
+            # token=self._set_token(),
+            token="",
+            client=self._client,
+            tag=self._device_model.tag,
+            language=self._language,
+            timeout=self._device_model.timeout,
+        )
+        return
+
+    def _check_portal_installed(self) -> bool:
+        return self._adb.get_app_info("com.hermes.portal") is not None
+
+    def _install_portal(self):
+        if self._check_portal_installed():
             return
-        else:
-            raise ValueError("driver type is not supported")
+        with httpx.Client() as client:
+            tmp_file = config.CACHE_DIR / "app-debug.apk"
+            response = client.get(config.PORTAL_DOWNLOAD_URL)
+            response.raise_for_status()
+            with open(tmp_file, "wb") as f:
+                f.write(response.content)
+            self._adb.install(tmp_file)
+
+    def _setup_portal(self, port: int):
+        self._install_portal()
+        self._adb.start_app("com.hermes.portal", ".MainActivity")
+        for _ in range(10):
+            if self._adb.get_pid("com.hermes.portal") != -1:
+                break
+            time.sleep(1)
+        if not self._adb.check_accessibility_service(
+            config.PORTAL_ACCESSIBILITY_SERVICE
+        ):
+            self._adb.set_accessibility_service(config.PORTAL_ACCESSIBILITY_SERVICE)
+            assert self._adb.check_accessibility_service(
+                config.PORTAL_ACCESSIBILITY_SERVICE
+            )
+            # assert self._adb.insert_content(PortalContent.ENABLE_SOCKET_SERVER)
+        self._adb.forward_port(port, config.PORTAL_SOCKET_SERVER_PORT)
+        self._adb.query_content(PortalContent.ENABLE_SERVICE)
+
+    def ping(self) -> bool:
+        url = f"{self._base_url}{PortalHTTP.PING}"
+        logger.info(f"Ping portal server: {url}")
+        for i in range(10):
+            try:
+                response = self._client.get(url)
+            except Exception as e:
+                logger.warning(f"Ping portal server failed: {e}, retry {i}")
+                time.sleep(1)
+                continue
+            if response.status_code == 200:
+                return True
+            time.sleep(1)
+        return False
+
+    def _set_token(self) -> str:
+        res = self._adb.query_content(PortalContent.AUTH_TOKEN)
+        pattern = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        search_res = re.search(pattern, res)
+        if not search_res:
+            raise ValueError("token is empty")
+        return search_res.group()
 
     def disconnect(self):
-        if self._initial_driver:
-            if self._driver_type == DriverType.APPIUM:
-                self._initial_driver.quit()
-            else:
-                self._initial_driver.close()
-            self._driver = None
+        if self._port:
+            hermes_cache.release_portal_port(self._port)
+            self._adb.remove_forward_port(self._port)
 
     def reconnect(self):
         self.disconnect()
         self.connect()
-
-    def check_driver(self) -> bool:
-        if self._initial_driver:
-            if self._driver_type == DriverType.APPIUM:
-                return self._initial_driver.get_window_size() is not None
-            else:
-                return self._initial_driver.session_id is not None
-        return False
 
     @property
     def driver(self) -> DriverProtocol:
@@ -107,6 +135,8 @@ class AndroidDevice(DeviceProtocol):
             raise ValueError("driver is not initialized")
         return self._driver
 
-    def adb(self) -> DebugBridgeProtocol: ...
+    @property
+    def adb(self) -> DebugBridgeProtocol:
+        return self._adb
 
-    def ai(self): ...
+    def media_calcualte(self): ...

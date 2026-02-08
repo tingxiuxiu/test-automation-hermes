@@ -33,7 +33,7 @@ class StepModel(BaseModel):
         "passed"
     )
     exception: str | None = None
-    steps: list[StepModel] = []
+    steps: list["StepModel"] = []
 
 
 class CaseModel(BaseModel):
@@ -47,4 +47,4 @@ class CaseModel(BaseModel):
     screenshot: Path | None = None
     video: Path | None = None
     logger: Path | None = None
-    steps: list[StepModel] = []
+    steps: list["StepModel"] = []

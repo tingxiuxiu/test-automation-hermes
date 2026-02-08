@@ -2,10 +2,10 @@ from enum import Enum
 
 
 class Language(Enum):
-    CHINESE = "zh"
-    CHINESE_TRADITIONAL = "zh-HK"
-    ENGLISH = "en"
-    JAPANESE = "ja"
-    KOREAN = "ko"
-    GERMAN = "de"
-    FRENCH = "fr"
+    CHINESE = "chinese"
+    CHINESE_TRADITIONAL = "chinese-traditional"
+    ENGLISH = "english"
+    JAPANESE = "japanese"
+    KOREAN = "korean"
+    GERMAN = "german"
+    FRENCH = "french"

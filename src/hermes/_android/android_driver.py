@@ -1,55 +1,148 @@
 import time
-from collections.abc import Sequence
+import json
+import httpx
+
+import elementpath
+from xml.etree import ElementTree
+
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, overload
+from typing import Literal, overload, Sequence
+from loguru import logger
 
-from appium.webdriver.webdriver import WebDriver
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.webdriver.common.actions import interaction
-from selenium.webdriver.common.actions.action_builder import ActionBuilder
-from selenium.webdriver.common.actions.pointer_input import PointerInput
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import WebDriverWait
-
-from .._core import config
-from .._protocol.component_protocol import ComponentProtocol
-from .._protocol.driver_protocol import DriverProtocol
-from ..models.component import Box, Point, Size
+from .._core import config, hermes_cache
+from .._core.portal_protocol import PortalHTTP
+from ..protocol.component_protocol import ComponentProtocol
+from ..protocol.driver_protocol import DriverProtocol
+from ..protocol.debug_bridge_protocol import DebugBridgeProtocol
+from ..models.component import Bounds, Point, Size
 from ..models.language import Language
-from ..models.selector import Selector, SelectorKey
+from ..models.selector import Selector, SelectorKey, Window
 from .android_component import AndroidComponent
-from .selector_paser import SelectorParser
+from .._media.image_component import ImageComponent
+from .selector_paser import SelectorParser, Method
+from ..utils.tools import parse_url
+from .._media.image_calc import ImageCalc
 
 
 class AndroidDriver(DriverProtocol):
     def __init__(
-        self, driver: WebDriver, name: str, language: Language, timeout: int = 8000
+        self,
+        adb: DebugBridgeProtocol,
+        tag: str,
+        base_url: str,
+        token: str,
+        client: httpx.Client,
+        language: Language,
+        timeout: int = 8000,
     ):
-        self._driver = driver
-        self._name = name
+        self._adb = adb
+        self._tag = tag
         self._language = language
         self._timeout = timeout
         self._window_size: Size | None = None
-        driver.implicitly_wait(timeout / 1000)
+        self._base_url = base_url
+        self._token = token
+        self._client = client
+        self._headers = {"Authorization": f"Bearer {token}"}
+        self._latest_page_id = -1
+        self._cached_page: dict[int, ElementTree.Element] = dict()
 
     def get_window_size(self, refresh: bool = False) -> Size:
         if refresh or not self._window_size:
-            _size = self._driver.get_window_size()
-            self._window_size = Size(width=_size["width"], height=_size["height"])
+            _size = self._adb.get_window_size()
+            self._window_size = _size
         return self._window_size
 
-    @property
-    def page_source(self) -> str:
-        return self._driver.page_source
+    def get_page(self, display_id: int) -> str:
+        latest_page_id = self._wait_stable(self._timeout)
+        response = self._client.get(
+            parse_url(self._base_url, f"{PortalHTTP.NODES_XML}/{display_id}")
+        )
+        if response.status_code == 200:
+            raw_bytes = response.content
+            if not raw_bytes:
+                raise ValueError("Empty response content")
+            xml_text = raw_bytes.decode("utf-8")
+            self._cached_page[latest_page_id] = ElementTree.XML(xml_text)
+            return xml_text
+        raise ValueError(f"Failed to get page, error: {response.content}")
+
+    def get_json_tree(self, display_id: int) -> dict:
+        self._wait_stable(self._timeout)
+        response = self._client.get(
+            parse_url(self._base_url, f"{PortalHTTP.NODES_XML}/{display_id}")
+        )
+        if response.status_code == 200:
+            raw_bytes = response.content
+            if not raw_bytes:
+                raise ValueError("Empty response content")
+            json_text = raw_bytes.decode("utf-8")
+            return json.loads(json_text)
+        raise ValueError(f"Failed to get page, error: {response.content}")
+
+    def _wait_stable(self, timeout: int):
+        start = time.time()
+        while time.time() - start < timeout / 1000:
+            response = self._client.get(
+                parse_url(self._base_url, PortalHTTP.WINDOW_STATE)
+            )
+            if response.status_code != 200:
+                raise ValueError(f"Failed to get status, error: {response.content}")
+            res_json = response.json()
+            if not res_json.get("success"):
+                raise ValueError(
+                    f"Failed to get status, error: {res_json.get('result')}"
+                )
+            else:
+                current_page_id = res_json.get("result")["stateId"]
+                if current_page_id == self._latest_page_id:
+                    break
+                self._latest_page_id = current_page_id
+                time.sleep(0.1)
+        return self._latest_page_id
+
+    def get_tree(self, display_id: int, timeout: int) -> ElementTree.Element:
+        latest_page_id = self._wait_stable(timeout)
+        if latest_page_id in self._cached_page:
+            return self._cached_page[latest_page_id]
+        else:
+            response = self._client.get(
+                parse_url(self._base_url, f"{PortalHTTP.NODES_XML}/{display_id}")
+            )
+            response.raise_for_status()
+            raw_bytes = response.content
+            if not raw_bytes:
+                raise ValueError("Empty response content")
+            xml_text = raw_bytes.decode("utf-8")
+            self._cached_page[latest_page_id] = ElementTree.XML(xml_text)
+            return self._cached_page[latest_page_id]
+
+    def _find_nodes_by_xpath(
+        self, xpath: str, visible: bool, window: Window, timeout: int
+    ) -> Sequence[ElementTree.Element]:
+        logger.debug(f"Find nodes by xpath: {xpath}")
+        start_time = time.time()
+        while time.time() - start_time < int(timeout / 1000):
+            page = self.get_tree(window.display_id, timeout)
+            elements = elementpath.select(page, xpath)
+            if elements:
+                if visible:
+                    return elements
+            else:
+                if not visible:
+                    return []
+        raise TimeoutError("Check nodes timeout")
 
     def tap(self, target: ComponentProtocol | Selector | Point):
         if isinstance(target, AndroidComponent):
             target.tap()
         elif isinstance(target, Selector):
-            self.locator(target).tap()
+            element = self.locator(target)
+            if element:
+                element.tap()
         elif isinstance(target, Point):
-            self._driver.tap([(target.x, target.y)])
+            self._adb.tap(target.x, target.y)
         else:
             raise ValueError("Invalid target type")
 
@@ -59,9 +152,11 @@ class AndroidDriver(DriverProtocol):
         if isinstance(target, AndroidComponent):
             target.long_press(duration)
         elif isinstance(target, Selector):
-            self.locator(target).long_press(duration)
+            element = self.locator(target)
+            if element:
+                element.long_press(duration)
         elif isinstance(target, Point):
-            self._driver.tap([(target.x, target.y)], duration)
+            self._adb.long_press(target.x, target.y, duration)
         else:
             raise ValueError("Invalid target type")
 
@@ -69,148 +164,240 @@ class AndroidDriver(DriverProtocol):
         self,
         selector: Selector,
         *,
+        visible: bool = True,
         combination: Sequence[SelectorKey] | None = None,
         language: Language | None = None,
-    ) -> AndroidComponent:
+        timeout: int | None = None,
+    ) -> ComponentProtocol | None:
         if language is None:
             language = self._language
         parser = SelectorParser(selector, language, combination)
-        return AndroidComponent(
-            driver=self._driver,
-            name=self._name,
-            element=self._driver.find_element(parser.get_by(), parser.get_value()),
-            language=language,
-            timeout=self._timeout,
-            monitor=parser.get_monitor(),
-        )
+        if parser.get_method() == Method.IMAGE:
+            img_modals = ImageCalc().wait_for(
+                parser.get_image(),
+                driver=self,
+                threshold=parser.get_threshold(),
+                visible=visible,
+                timeout=timeout or self._timeout,
+            )
+            if not img_modals:
+                return None
+            return ImageComponent(
+                image=img_modals[0],
+                language=language,
+                timeout=self._timeout,
+                window=parser.get_window(),
+            )
+        else:
+            nodes = self._find_nodes_by_xpath(
+                parser.get_xpath(),
+                visible=visible,
+                window=parser.get_window(),
+                timeout=timeout or self._timeout,
+            )
+            if not nodes:
+                return None
+            return AndroidComponent(
+                base_url=self._base_url,
+                base_xpath=parser.get_xpath(),
+                token=self._token,
+                tag=self._tag,
+                adb=self._adb,
+                client=self._client,
+                node=nodes[0],
+                language=language,
+                timeout=self._timeout,
+                window=parser.get_window(),
+            )
 
     def locators(
         self,
         selector: Selector,
         *,
-        combination: Sequence[SelectorKey] | None = None,
-        language: Language | None = None,
-    ) -> Sequence[AndroidComponent]:
-        if language is None:
-            language = self._language
-        parser = SelectorParser(selector, language, combination)
-        return [
-            AndroidComponent(
-                driver=self._driver,
-                name=self._name,
-                element=ele,
-                language=language,
-                timeout=self._timeout,
-                monitor=parser.get_monitor(),
-            )
-            for ele in self._driver.find_elements(parser.get_by(), parser.get_value())
-        ]
-
-    @overload
-    def wait_for(
-        self,
-        selector: Selector,
-        *,
-        visible: Literal[True],
-        timeout: int = 15000,
-        combination: Sequence[SelectorKey] | None = None,
-        language: Language | None = None,
-    ) -> AndroidComponent: ...
-
-    @overload
-    def wait_for(
-        self,
-        selector: Selector,
-        *,
-        visible: Literal[False],
-        timeout: int = 15000,
-        combination: Sequence[SelectorKey] | None = None,
-        language: Language | None = None,
-    ) -> bool: ...
-
-    def wait_for(
-        self,
-        selector: Selector,
-        *,
         visible: bool = True,
-        timeout: int = 15000,
         combination: Sequence[SelectorKey] | None = None,
         language: Language | None = None,
-    ) -> AndroidComponent | bool:
+        timeout: int | None = None,
+    ) -> Sequence[ComponentProtocol]:
         if language is None:
             language = self._language
         parser = SelectorParser(selector, language, combination)
-        wait = WebDriverWait(self._driver, timeout / 1000)
-        if visible:
-            ele = wait.until(
-                EC.presence_of_element_located((parser.get_by(), parser.get_value()))
+        if parser.get_method() == Method.IMAGE:
+            img_modals = ImageCalc().wait_for(
+                parser.get_image(),
+                driver=self,
+                threshold=parser.get_threshold(),
+                visible=visible,
+                timeout=timeout or self._timeout,
             )
-            return AndroidComponent(
-                driver=self._driver,
-                name=self._name,
-                element=ele,  # type: ignore
-                language=language,
-                timeout=timeout,
-                monitor=parser.get_monitor(),
-            )
+            if not img_modals:
+                return []
+            return [
+                ImageComponent(
+                    image=img_modal,
+                    language=language,
+                    timeout=self._timeout,
+                    window=parser.get_window(),
+                )
+                for img_modal in img_modals
+            ]
         else:
-            ele = wait.until_not(
-                EC.presence_of_element_located((parser.get_by(), parser.get_value()))
+            nodes = self._find_nodes_by_xpath(
+                parser.get_xpath(),
+                visible=visible,
+                window=parser.get_window(),
+                timeout=timeout or self._timeout,
             )
-            return ele is None
+            if not nodes:
+                return []
+            return [
+                AndroidComponent(
+                    base_url=self._base_url,
+                    base_xpath=parser.get_xpath(),
+                    token=self._token,
+                    tag=self._tag,
+                    adb=self._adb,
+                    client=self._client,
+                    node=node,
+                    language=language,
+                    timeout=self._timeout,
+                    window=parser.get_window(),
+                )
+                for node in nodes
+            ]
 
     def scroll_into_view(
         self,
         target: Selector,
-        scrollable: Selector | Box,
+        scrollable: Selector | Bounds,
         *,
         horizontal: bool = False,
         target_combination: Sequence[SelectorKey] | None = None,
         scrollable_combination: Sequence[SelectorKey] | None = None,
         target_language: Language | None = None,
         scrollable_language: Language | None = None,
-    ) -> AndroidComponent:
+    ) -> ComponentProtocol | None:
         if target_language is None:
             target_language = self._language
         if scrollable_language is None:
             scrollable_language = self._language
         target_s = SelectorParser(target, target_language, target_combination)
-        if isinstance(scrollable, Box):
-            start = Point(
-                x=int(scrollable.left + scrollable.width / 2),
-                y=int(scrollable.top + scrollable.height / 2),
-            )
-            end = Point(
-                x=int(scrollable.left + scrollable.width / 2),
-                y=int(scrollable.bottom * 0.7 + scrollable.height / 2),
-            )
-            for _ in range(8):
-                self.swipe(start, end, wait_render=500)
-                if ele := self.wait_for(
-                    target,
-                    visible=True,
-                    combination=target_combination,
-                    language=target_language,
-                    timeout=1000,
-                ):
-                    return ele
-            raise Exception("Scroll into view failed")
-        else:
-            scrollable_s = SelectorParser(
-                scrollable, scrollable_language, scrollable_combination
-            )
+        if isinstance(scrollable, Bounds):
             if horizontal:
-                uiautomator_t = f"new UiScrollable({scrollable_s.get_value()}.scrollable(true)).setAsHorizontalList().scrollIntoView({target_s.get_value()})"
+                start = Point(
+                    x=int(scrollable.left + (scrollable.right - scrollable.left) / 2),
+                    y=int(scrollable.top + (scrollable.bottom - scrollable.top) / 2),
+                )
+                end = Point(
+                    x=int(scrollable.left + (scrollable.right - scrollable.left) / 2),
+                    y=int(
+                        scrollable.bottom * 0.7
+                        + (scrollable.bottom - scrollable.top) / 2
+                    ),
+                )
             else:
-                uiautomator_t = f"new UiScrollable({scrollable_s.get_value()}.scrollable(true)).setAsVerticalList().scrollIntoView({target_s.get_value()})"
-            ele = self._driver.find_element(target_s.get_by(), uiautomator_t)
-            return AndroidComponent(
-                driver=self._driver,
-                name=self._name,
-                element=ele,
+                start = Point(
+                    x=int(scrollable.left + (scrollable.right - scrollable.left) / 2),
+                    y=int(scrollable.top + (scrollable.bottom - scrollable.top) / 2),
+                )
+                end = Point(
+                    x=int(scrollable.left + (scrollable.right - scrollable.left) / 2),
+                    y=int(
+                        scrollable.top * 0.3 + (scrollable.bottom - scrollable.top) / 2
+                    ),
+                )
+        else:
+            scrollable_element = self.locator(
+                scrollable,
+                visible=True,
+                combination=scrollable_combination,
+                language=scrollable_language,
+                timeout=1000,
+            )
+            if not scrollable_element:
+                return None
+            if horizontal:
+                start = Point(
+                    x=int(
+                        scrollable_element.get_bounds().left
+                        + (
+                            scrollable_element.get_bounds().right
+                            - scrollable_element.get_bounds().left
+                        )
+                        / 2
+                    ),
+                    y=int(
+                        scrollable_element.get_bounds().top
+                        + (
+                            scrollable_element.get_bounds().bottom
+                            - scrollable_element.get_bounds().top
+                        )
+                        / 2
+                    ),
+                )
+                end = Point(
+                    x=int(
+                        scrollable_element.get_bounds().left
+                        + (
+                            scrollable_element.get_bounds().right
+                            - scrollable_element.get_bounds().left
+                        )
+                        / 2
+                    ),
+                    y=int(
+                        scrollable_element.get_bounds().bottom * 0.7
+                        + (
+                            scrollable_element.get_bounds().bottom
+                            - scrollable_element.get_bounds().top
+                        )
+                        / 2
+                    ),
+                )
+            else:
+                start = Point(
+                    x=int(
+                        scrollable_element.get_bounds().left
+                        + (
+                            scrollable_element.get_bounds().right
+                            - scrollable_element.get_bounds().left
+                        )
+                        / 2
+                    ),
+                    y=int(
+                        scrollable_element.get_bounds().top
+                        + (
+                            scrollable_element.get_bounds().bottom
+                            - scrollable_element.get_bounds().top
+                        )
+                        / 2
+                    ),
+                )
+                end = Point(
+                    x=int(
+                        scrollable_element.get_bounds().left
+                        + (
+                            scrollable_element.get_bounds().right
+                            - scrollable_element.get_bounds().left
+                        )
+                        / 2
+                    ),
+                    y=int(
+                        scrollable_element.get_bounds().top * 0.3
+                        + (
+                            scrollable_element.get_bounds().bottom
+                            - scrollable_element.get_bounds().top
+                        )
+                        / 2
+                    ),
+                )
+        for _ in range(8):
+            self.swipe(start, end, wait_render=500)
+            return self.locator(
+                target,
+                visible=True,
+                combination=target_combination,
                 language=target_language,
-                timeout=self._timeout,
-                monitor=target_s.get_monitor(),
+                timeout=1000,
             )
 
     def drag_and_drop(
@@ -223,25 +410,23 @@ class AndroidDriver(DriverProtocol):
         if isinstance(start, Point):
             _start = start
         elif isinstance(start, Selector):
-            _start = self.wait_for(start, visible=True).center()
+            _start = self.locator(start, visible=True)
+            if not _start:
+                return None
+            _start = _start.get_center()
         else:
-            _start = start.center()
+            _start = start.get_center()
 
         if isinstance(end, Point):
             _end = end
         elif isinstance(end, Selector):
-            _end = self.wait_for(end, visible=True).center()
+            _end = self.locator(end, visible=True)
+            if not _end:
+                return None
+            _end = _end.get_center()
         else:
-            _end = end.center()
-        touch_input = PointerInput(interaction.POINTER_TOUCH, "touch")
-        action = ActionChains(self._driver)
-        action.w3c_actions = ActionBuilder(self._driver, mouse=touch_input)
-        action.w3c_actions.pointer_action.move_to_location(
-            _start.x, _start.y
-        ).pointer_down().pause(duration / 1000).move_to_location(
-            _end.x, _end.y
-        ).pointer_up().release()
-        action.perform()
+            _end = end.get_center()
+        self._adb.drag_and_drop(_start, _end, duration=duration)
 
     def swipe(
         self,
@@ -255,24 +440,24 @@ class AndroidDriver(DriverProtocol):
         if isinstance(start, Point):
             _start = start
         elif isinstance(start, Selector):
-            _start = self.wait_for(start, visible=True).center()
+            _start = self.locator(start, visible=True)
+            if not _start:
+                return None
+            _start = _start.get_center()
         else:
-            _start = start.center()
+            _start = start.get_center()
 
         if isinstance(end, Point):
             _end = end
         elif isinstance(end, Selector):
-            _end = self.wait_for(end, visible=True).center()
+            _end = self.locator(end, visible=True)
+            if not _end:
+                return None
+            _end = _end.get_center()
         else:
-            _end = end.center()
+            _end = end.get_center()
         for _ in range(repeat):
-            self._driver.swipe(
-                start_x=_start.x,
-                start_y=_start.y,
-                end_x=_end.x,
-                end_y=_end.y,
-                duration=duration,
-            )
+            self._adb.swipe(_start, _end, duration=duration)
             time.sleep(wait_render / 1000)
 
     def zoom_in(
@@ -286,32 +471,16 @@ class AndroidDriver(DriverProtocol):
         if isinstance(target, Point):
             _target = target
         elif isinstance(target, Selector):
-            _target = self.wait_for(target, visible=True).center()
+            _target = self.locator(target, visible=True)
+            if not _target:
+                return None
+            _target = _target.get_center()
         else:
-            _target = target.center()
+            _target = target.get_center()
         w_size = self.get_window_size()
         m_size = Point(
             x=int(w_size.width / 2 * scale), y=int(w_size.height / 2 * scale)
         )
-        f1 = PointerInput(interaction.POINTER_TOUCH, "touch")
-        f2 = PointerInput(interaction.POINTER_TOUCH, "touch2")
-        action = ActionBuilder(self._driver)
-        action._add_input(f1)
-        action._add_input(f2)
-
-        action.pointer_action.move_to_location(_target.x + m_size.x, _target.y)
-        action.pointer_action.pointer_down()
-        action.pointer_action.pause(duration / 1000)
-        action.pointer_action.move_to_location(_target.x, _target.y)
-        action.pointer_action.pointer_up()
-
-        action.pointer_action.move_to_location(_target.x, _target.y + m_size.y)
-        action.pointer_action.pointer_down()
-        action.pointer_action.pause(duration / 1000)
-        action.pointer_action.move_to_location(_target.x, _target.y)
-        action.pointer_action.pointer_up()
-
-        action.perform()
         time.sleep(wait_render / 1000)
 
     def zoom_out(
@@ -325,39 +494,26 @@ class AndroidDriver(DriverProtocol):
         if isinstance(target, Point):
             _target = target
         elif isinstance(target, Selector):
-            _target = self.wait_for(target, visible=True).center()
+            _target = self.locator(target, visible=True)
+            if not _target:
+                return None
+            _target = _target.get_center()
         else:
-            _target = target.center()
+            _target = target.get_center()
         w_size = self.get_window_size()
         m_size = Point(
             x=int(w_size.width / 2 * scale), y=int(w_size.height / 2 * scale)
         )
-        f1 = PointerInput(interaction.POINTER_TOUCH, "touch")
-        f2 = PointerInput(interaction.POINTER_TOUCH, "touch2")
-        action = ActionBuilder(self._driver)
-        action._add_input(f1)
-        action._add_input(f2)
-
-        action.pointer_action.move_to_location(_target.x, _target.y)
-        action.pointer_action.pointer_down()
-        action.pointer_action.pause(duration / 1000)
-        action.pointer_action.move_to_location(_target.x + m_size.x, _target.y)
-        action.pointer_action.pointer_up()
-
-        action.pointer_action.move_to_location(_target.x, _target.y)
-        action.pointer_action.pointer_down()
-        action.pointer_action.pause(duration / 1000)
-        action.pointer_action.move_to_location(_target.x, _target.y + m_size.y)
-        action.pointer_action.pointer_up()
-
-        action.perform()
         time.sleep(wait_render / 1000)
 
-    def screenshot(self, path: Path | None = None) -> Path:
+    def screenshot(self, path: Path | None = None, display_id: int = 0) -> Path:
         if path is None:
             path = (
                 config.CACHE_DIR
-                / f"{self._name}-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}-screenshot.png"
+                / f"{self._tag}-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}-screenshot.png"
             )
-        self._driver.save_screenshot(path)
+        res = self._client.get(f"{self._base_url}{PortalHTTP.SCREENSHOT}/{display_id}")
+        if res.status_code == 200:
+            with open(path, "wb") as f:
+                f.write(res.content)
         return path

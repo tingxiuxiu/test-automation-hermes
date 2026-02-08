@@ -1,19 +1,20 @@
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal, Protocol
+from subprocess import CompletedProcess
 
 from ..models.common import PopenOutput
-from ..models.component import Box, Point, Size
+from ..models.component import Bounds, Point, Size
 
 
 class DebugBridgeProtocol(Protocol):
-    def command(
+    def cmd(
         self,
         command: str,
         timeout: int = 30000,
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
-    ) -> PopenOutput: ...
+    ) -> CompletedProcess: ...
 
     def shell(
         self,
@@ -21,7 +22,7 @@ class DebugBridgeProtocol(Protocol):
         timeout: int = 30000,
         cwd: Path | None = None,
         env: Mapping[str, str] | None = None,
-    ) -> PopenOutput: ...
+    ) -> CompletedProcess: ...
 
     def clear_logcat(self): ...
 
@@ -41,9 +42,13 @@ class DebugBridgeProtocol(Protocol):
 
     def click_home(self): ...
 
+    def click_menu(self): ...
+
     def click_recent_task(self): ...
 
-    def get_screen_size(self, refresh: bool = False) -> Size: ...
+    def click_power(self): ...
+
+    def get_window_size(self, refresh: bool = False) -> Size: ...
 
     def tap(self, x: int, y: int, offset_x: int = 0, offset_y: int = 0): ...
 
@@ -67,7 +72,7 @@ class DebugBridgeProtocol(Protocol):
         direction: Literal["up", "down", "right", "left"],
         *,
         scale: float = 0.9,
-        box: Box | None = None,
+        bounds: Bounds | None = None,
         duration: int = 500,
         repeat: int = 1,
         wait_render: int = 200,
@@ -90,3 +95,7 @@ class DebugBridgeProtocol(Protocol):
     def get_app_info(self, package_name: str) -> str: ...
 
     def get_app_version(self, package_name: str) -> str | None: ...
+
+    def query_content(self, uri: str) -> str: ...
+
+    def insert_content(self, uri: str, values: dict[str, str]): ...

@@ -11,6 +11,12 @@ class Config(BaseSettings):
         env_file=os.environ.get("HERMERS_ENV"),
         extra="ignore",
     )
+    PORTAL_DOWNLOAD_URL: str = "https://github.com/portal-0.1.0.apk"
+    PORTAL_PACKAGE_NAME: str = "com.hermes.portal"
+    PORTAL_ACCESSIBILITY_SERVICE: str = (
+        "com.hermes.portal/com.hermes.portal.HermesAccessibilityService"
+    )
+    PORTAL_SOCKET_SERVER_PORT: int = 8080
 
     CACHE_DIR: Path = Path.cwd() / "cache"
 
@@ -34,5 +40,5 @@ class Config(BaseSettings):
         "{name}:{function}:{line} - <level>{message}</level>"
     )
 
-    OCR_API_KEY: str
-    YOLO_API_KEY: str
+    OCR_API_KEY: str = ""
+    YOLO_API_KEY: str = ""

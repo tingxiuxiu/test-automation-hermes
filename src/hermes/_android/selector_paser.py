@@ -1,22 +1,27 @@
-from collections.abc import Sequence
-
-from appium.webdriver.common.appiumby import AppiumBy
+from re import X
+from typing import Sequence
+from pathlib import Path
 
 from ..models.language import Language
-from ..models.selector import Selector, SelectorKey
+from ..models.selector import Selector, SelectorKey, Method
 
-_UIAUTOMATOR_FORMAT = {
-    "id": 'new UiSelector().resourceId("{}")',
-    "class_name": 'new UiSelector().className("{}")',
-    "description": 'new UiSelector().description("{}")',
-    "description_contains": 'new UiSelector().descriptionContains("{}")',
-    "description_starts_with": 'new UiSelector().descriptionStartsWith("{}")',
-    "description_matches": 'new UiSelector().descriptionMatches("{}")',
-    "text": 'new UiSelector().text("{}")',
-    "text_contains": 'new UiSelector().textContains("{}")',
-    "text_starts_with": 'new UiSelector().textStartsWith("{}")',
-    "text_matches": 'new UiSelector().textMatches("{}")',
-}
+KEYS = [
+    SelectorKey.ID,
+    SelectorKey.TEXT,
+    SelectorKey.DESCRIPTION,
+    SelectorKey.XPATH,
+    # SelectorKey.JSONPATH,
+    SelectorKey.CLASS_NAME,
+    SelectorKey.TEXT_STARTS_WITH,
+    SelectorKey.TEXT_ENDS_WITH,
+    SelectorKey.TEXT_CONTAINS,
+    SelectorKey.TEXT_MATCHES,
+    SelectorKey.DESCRIPTION_STARTS_WITH,
+    SelectorKey.DESCRIPTION_ENDS_WITH,
+    SelectorKey.DESCRIPTION_CONTAINS,
+    SelectorKey.DESCRIPTION_MATCHES,
+    SelectorKey.IMAGE,
+]
 
 
 class SelectorParser:
@@ -26,120 +31,103 @@ class SelectorParser:
         language: Language,
         combination: Sequence[SelectorKey] | None = None,
     ):
-        self._selector = selector.to_dict()
-        self._monitor = selector.monitor
+        self._selector = selector
+        self._window = selector.window
         self._language = language
         self._combination = combination
-        self._by = None
-        self._value = None
+        self._method: Method = Method.XPATH
+        self._xpath: str | None = None
+        self._image: Path | None = None
+        self._threshold: float = 0.95
         self._inused_selector = self._valiadate_combination()
-        self._filter_selector()
+        self._process_selector()
 
-    def get_monitor(self):
-        return self._monitor
+    def get_window(self):
+        return self._window
 
-    def get_by(self):
-        if self._by is None:
-            raise ValueError("Invalid selector")
-        return self._by
+    def get_method(self):
+        return self._method
 
-    def get_value(self):
-        if self._value is None:
-            raise ValueError("Invalid selector")
-        return self._value
+    def get_xpath(self):
+        if self._xpath is None:
+            raise ValueError("Invalid xpath selector")
+        return self._xpath
 
-    def _transform_ends_with(self, value):
-        if isinstance(value, str):
-            return f".*{value}"
-        else:
-            return f".*{value[self._language]}"
+    def get_image(self):
+        if self._image is None:
+            raise ValueError("Invalid image selector")
+        return self._image
+
+    def get_threshold(self):
+        return self._threshold
 
     def _valiadate_combination(self):
         inused_selector = {}
         if self._combination is None:
-            for key in self._selector:
-                if not self._selector[key]:
-                    if key == SelectorKey.TEXT_ENDS_WITH.value:
-                        inused_selector[SelectorKey.TEXT_MATCHES.value] = (
-                            self._transform_ends_with(self._selector[key])
-                        )
-                    elif key == SelectorKey.DESCRIPTION_ENDS_WITH.value:
-                        inused_selector[SelectorKey.DESCRIPTION_MATCHES.value] = (
-                            self._transform_ends_with(self._selector[key])
-                        )
-                    else:
-                        inused_selector[key] = self._transform_value(
-                            self._selector[key]
-                        )
+            for key in KEYS:
+                if n := self._selector.get_value(key, self._language):
+                    inused_selector[key] = n
                     break
-            if not inused_selector:
-                raise ValueError("Invalid selector")
         else:
             for key in self._combination:
-                if key not in self._selector:
+                if key not in KEYS:
                     raise ValueError(f"Invalid selector key: {key}")
-                else:
-                    inused_selector[key] = self._transform_value(
-                        self._selector[key.value]
-                    )
                 if key == SelectorKey.IMAGE:
                     raise ValueError("Image selector is not supported in combination")
-                elif key == SelectorKey.ANDROID_UIAUTOMATOR:
-                    raise ValueError(
-                        "Android uiautomator selector is not supported in combination"
-                    )
-                elif key == SelectorKey.XPATH:
+                if key == SelectorKey.XPATH:
                     raise ValueError("Xpath selector is not supported in combination")
+                inused_selector[key] = self._selector.get_value(key, self._language)
+        if not inused_selector:
+            raise ValueError("Invalid selector: No valid selector found")
         return inused_selector
 
-    def _transform_value(self, value):
-        if isinstance(value, str):
-            return value
-        else:
-            return value[self._language]
-
-    def _filter_selector(self):
+    def _process_selector(self):
+        _values = []
+        _xpath = "//*"
+        # 单独处理 CLASS_NAME
+        if SelectorKey.CLASS_NAME in self._inused_selector:
+            _xpath = f"//{self._inused_selector[SelectorKey.CLASS_NAME]}"
+            self._inused_selector.pop(SelectorKey.CLASS_NAME)
         for key, value in self._inused_selector.items():
-            if key == SelectorKey.ID.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = _UIAUTOMATOR_FORMAT[key].format(value)
-            elif key == SelectorKey.TEXT.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = _UIAUTOMATOR_FORMAT[key].format(value)
-            elif key == SelectorKey.DESCRIPTION.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = _UIAUTOMATOR_FORMAT[key].format(value)
-            elif key == SelectorKey.XPATH.value:
-                self._by = AppiumBy.XPATH
-                self._value = value
-            elif key == SelectorKey.TEXT_STARTS_WITH.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = _UIAUTOMATOR_FORMAT[key].format(value)
-            elif key == SelectorKey.TEXT_CONTAINS.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = _UIAUTOMATOR_FORMAT[key].format(value)
-            elif key == SelectorKey.TEXT_MATCHES.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = _UIAUTOMATOR_FORMAT[key].format(value)
-            elif key == SelectorKey.DESCRIPTION_STARTS_WITH.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = _UIAUTOMATOR_FORMAT[key].format(value)
-            elif key == SelectorKey.DESCRIPTION_CONTAINS.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = _UIAUTOMATOR_FORMAT[key].format(value)
-            elif key == SelectorKey.DESCRIPTION_MATCHES.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = _UIAUTOMATOR_FORMAT[key].format(value)
-            elif key == SelectorKey.ANDROID_UIAUTOMATOR.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = value
-            elif key == SelectorKey.CLASS_NAME.value:
-                self._by = AppiumBy.ANDROID_UIAUTOMATOR
-                self._value = _UIAUTOMATOR_FORMAT[key].format(value)
-            elif key == SelectorKey.IMAGE.value:
-                self._by = AppiumBy.IMAGE
-                self._value = value
+            if key == SelectorKey.ID:
+                _values.append(f'@resource-id="{value}"')
+            elif key == SelectorKey.TEXT:
+                _values.append(f'@text="{value}"')
+            elif key == SelectorKey.DESCRIPTION:
+                _values.append(f'@content-desc="{value}"')
+            elif key == SelectorKey.XPATH:
+                self._xpath = value
+                self._method = Method.XPATH
+                return
+            elif key == SelectorKey.TEXT_STARTS_WITH:
+                _values.append(f'starts-with(@text, "{value}")')
+            elif key == SelectorKey.TEXT_ENDS_WITH:
+                _values.append(f'ends-with(@text, "{value}")')
+            elif key == SelectorKey.TEXT_CONTAINS:
+                _values.append(f'contains(@text, "{value}")')
+            elif key == SelectorKey.TEXT_MATCHES:
+                _values.append(f'matches(@text, "{value}")')
+            elif key == SelectorKey.DESCRIPTION_STARTS_WITH:
+                _values.append(f'starts-with(@content-desc, "{value}")')
+            elif key == SelectorKey.DESCRIPTION_ENDS_WITH:
+                _values.append(f'ends-with(@content-desc, "{value}")')
+            elif key == SelectorKey.DESCRIPTION_CONTAINS:
+                _values.append(f'contains(@content-desc, "{value}")')
+            elif key == SelectorKey.DESCRIPTION_MATCHES:
+                _values.append(f'matches(@content-desc, "{value}")')
+            elif key == SelectorKey.IMAGE:
+                self._method = Method.IMAGE
+                self._image = value.path
+                self._threshold = value.threshold
+                return
             else:
                 raise ValueError(f"Invalid selector key: {key}")
-
-        return self._by, self._value
+        if _values:
+            self._method = Method.XPATH
+            self._xpath = _xpath + "[" + " and ".join(_values) + "]"
+        else:
+            if _xpath == "//*":
+                raise ValueError("Invalid selector: No valid selector found")
+            self._method = Method.XPATH
+            self._xpath = _xpath
+        return

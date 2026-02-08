@@ -1,10 +1,10 @@
 from pydantic import BaseModel
 
-from .component import Box, Point
+from .component import Bounds, Point
 
 
 class OCRItem(BaseModel):
     text: str
-    box: Box
+    bounds: Bounds
     center: Point
     threshold: float

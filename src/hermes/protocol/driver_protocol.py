@@ -1,16 +1,19 @@
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Literal, Protocol, overload
-
-from ..models.component import Box, Point, Size
+from xml.etree import ElementTree
+from ..models.component import Bounds, Point, Size
 from ..models.language import Language
 from ..models.selector import Selector, SelectorKey
 from .component_protocol import ComponentProtocol
 
 
 class DriverProtocol(Protocol):
-    @property
-    def page_source(self) -> str: ...
+    """驱动协议"""
+
+    def get_page(self, display_id: int) -> str: ...
+
+    def get_tree(self, display_id: int, timeout: int) -> ElementTree.Element: ...
 
     def get_window_size(self) -> Size: ...
 
@@ -24,61 +27,31 @@ class DriverProtocol(Protocol):
         self,
         selector: Selector,
         *,
+        visible: bool = True,
         combination: Sequence[SelectorKey] | None = None,
         language: Language | None = None,
-    ) -> ComponentProtocol: ...
+    ) -> ComponentProtocol | None: ...
 
     def locators(
         self,
         selector: Selector,
         *,
+        visible: bool = True,
         combination: Sequence[SelectorKey] | None = None,
         language: Language | None = None,
     ) -> Sequence[ComponentProtocol]: ...
 
-    @overload
-    def wait_for(
-        self,
-        selector: Selector,
-        *,
-        visible: Literal[True],
-        timeout: int = 8000,
-        combination: Sequence[SelectorKey] | None = None,
-        language: Language | None = None,
-    ) -> ComponentProtocol: ...
-
-    @overload
-    def wait_for(
-        self,
-        selector: Selector,
-        *,
-        visible: Literal[False],
-        timeout: int = 8000,
-        combination: Sequence[SelectorKey] | None = None,
-        language: Language | None = None,
-    ) -> bool: ...
-
-    def wait_for(
-        self,
-        selector: Selector,
-        *,
-        visible: bool = True,
-        timeout: int = 8000,
-        combination: Sequence[SelectorKey] | None = None,
-        language: Language | None = None,
-    ) -> ComponentProtocol | bool: ...
-
     def scroll_into_view(
         self,
         target: Selector,
-        scrollable: Selector | Box,
+        scrollable: Selector | Bounds,
         *,
         horizontal: bool = False,
         target_combination: Sequence[SelectorKey] | None = None,
         scrollable_combination: Sequence[SelectorKey] | None = None,
         target_language: Language | None = None,
         scrollable_language: Language | None = None,
-    ) -> ComponentProtocol: ...
+    ) -> ComponentProtocol | None: ...
 
     def drag_and_drop(
         self,
