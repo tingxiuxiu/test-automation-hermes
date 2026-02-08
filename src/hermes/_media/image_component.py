@@ -1,10 +1,10 @@
-from typing import Sequence
+from collections.abc import Sequence
 from pathlib import Path
 
-from ..models.component import ImageModal
-from ..models.language import Language
-from ..models.selector import Window, Selector, SelectorKey
 from ..models.component import Bounds, Point, Size
+from ..models.language import Language
+from ..models.media import ImageModal
+from ..models.selector import Selector, SelectorKey, Window
 from ..protocol.component_protocol import ComponentProtocol
 
 
@@ -14,7 +14,7 @@ class ImageComponent(ComponentProtocol):
         image: ImageModal,
         language: Language,
         timeout: float,
-        window: Window | None = None,
+        window: Window,
     ):
         self._image = image
         self._language = language
