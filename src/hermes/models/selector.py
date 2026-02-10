@@ -4,6 +4,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from .language import Language
+from .media import MatchMethod
 
 
 class SelectorKey(Enum):
@@ -50,6 +51,7 @@ class MultiLanguageSelector(BaseModel):
 class ImageSelector(BaseModel):
     path: Path
     threshold: float = 0.9
+    method: MatchMethod | None = None
 
 
 class MultiLanguageImageSelector(BaseModel):

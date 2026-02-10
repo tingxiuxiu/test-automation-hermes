@@ -16,10 +16,3 @@ class Bounds(BaseModel):
     top: int
     right: int
     bottom: int
-
-
-class ImageModal(BaseModel):
-    tag: str
-    size: Size
-    center: Point
-    bounds: Bounds
