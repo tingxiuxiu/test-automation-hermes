@@ -16,7 +16,7 @@ class Config(BaseSettings):
     PORTAL_ACCESSIBILITY_SERVICE: str = (
         "com.hermes.portal/com.hermes.portal.HermesAccessibilityService"
     )
-    PORTAL_SOCKET_SERVER_PORT: int = 8080
+    PORTAL_SERVICE_PORT: int = 8089
 
     CACHE_DIR: Path = Path.cwd() / "cache"
 
