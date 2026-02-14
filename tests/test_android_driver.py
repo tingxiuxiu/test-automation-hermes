@@ -1,10 +1,9 @@
-from hermes import new_device
-from hermes.models.device import AndroidDeviceModel
 from loguru import logger
 
-from hermes.models.language import Language
+from hermes import new_device
+from hermes.models.device import AndroidDeviceModel
+
 from hermes.models.selector import Selector, SelectorKey
-from hermes.models.component import Point
 
 
 class TestDriver:
@@ -24,14 +23,16 @@ class TestDriver:
         assert size.width == 1080
         assert size.height == 2400
 
-    def test_get_page(self):
+    def test_get_xml_tree(self):
         """测试获取页面"""
-        page = self.d.driver.get_page(0)
+        page = self.d.driver.get_xml_tree(0)
+        logger.info(page)
         assert "Battery" in page
 
-    def test_get_tree(self):
+    def test_get_json_tree(self):
         """测试获取界面树"""
-        tree = self.d.driver.get_tree(0, 5000)
+        tree = self.d.driver.get_json_tree(0)
+        logger.info(tree)
         assert tree is not None
 
     def test_tap_with_selector(self):
@@ -39,7 +40,6 @@ class TestDriver:
         # 189, 1683, 357, 1754
         selector = Selector(text="Battery")
         self.d.driver.tap(selector)
-        logger.info(self.d.driver.get_page(0))
         selector = Selector(text="Battery usage")
         element = self.d.driver.locator(selector)
         assert element is not None

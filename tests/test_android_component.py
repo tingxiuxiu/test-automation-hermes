@@ -1,3 +1,5 @@
+import time
+
 from hermes import new_device
 from hermes.models.device import AndroidDeviceModel
 from loguru import logger
@@ -58,7 +60,7 @@ class TestDriver:
             selector, combination=[SelectorKey.CLASS_NAME, SelectorKey.TEXT]
         )
         assert component is not None
-        component.input("123456你好helloworld")
+        self.d.driver.input_text(0, "123456你好helloworld")
         selector = Selector(
             text="Search settings", class_name="android.widget.EditText"
         )
@@ -76,7 +78,7 @@ class TestDriver:
             selector, combination=[SelectorKey.CLASS_NAME]
         )
         assert component is not None
-        component.clear()
+        self.d.driver.clear_text(0)
         selector = Selector(
             text="Search settings", class_name="android.widget.EditText"
         )
