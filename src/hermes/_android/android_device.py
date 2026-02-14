@@ -3,8 +3,6 @@ import time
 
 import httpx
 
-from loguru import logger
-
 from ..protocol.debug_bridge_protocol import DebugBridgeProtocol
 from ..protocol.device_protocol import DeviceProtocol
 from ..protocol.driver_protocol import DriverProtocol
@@ -12,8 +10,8 @@ from ..models.device import AndroidDeviceModel
 from ..models.language import Language
 from .android_driver import AndroidDriver
 from .android_adb import AndroidADB
-from .._core import config, hermes_cache
-from .._core.portal_protocol import PortalContent, PortalHTTP
+from .._core import config, hermes_cache, portal_http
+from .._core.portal_protocol import PortalContent
 
 
 class AndroidDevice(DeviceProtocol):
@@ -30,11 +28,6 @@ class AndroidDevice(DeviceProtocol):
         )
         self._timeout = device_model.timeout
         self._port: int = hermes_cache.get_portal_port()
-        self._base_url: str = f"http://127.0.0.1:{self._port}"
-        self._client: httpx.Client = httpx.Client(timeout=3)
-
-    def __del__(self):
-        self._client.close()
 
     @property
     def device_model(self) -> AndroidDeviceModel:
@@ -52,15 +45,12 @@ class AndroidDevice(DeviceProtocol):
         self._setup_portal(self._port)
         if not self.ping():
             raise ConnectionError("Portal server not responsive")
-        self._adb.click_home()
         self._driver = AndroidDriver(
-            adb=self._adb,
-            base_url=self._base_url,
-            # token=self._set_token(),
-            token="",
-            client=self._client,
             tag=self._device_model.tag,
+            adb=self._adb,
+            token="",
             language=self._language,
+            locator_engine=self._device_model.locator_engine,
             timeout=self._device_model.timeout,
         )
         return
@@ -94,23 +84,12 @@ class AndroidDevice(DeviceProtocol):
                 config.PORTAL_ACCESSIBILITY_SERVICE
             )
             # assert self._adb.insert_content(PortalContent.ENABLE_SOCKET_SERVER)
-        self._adb.forward_port(port, config.PORTAL_SOCKET_SERVER_PORT)
+        self._adb.forward_port(port, config.PORTAL_SERVICE_PORT)
         self._adb.query_content(PortalContent.ENABLE_SERVICE)
+        portal_http.set_port(port)
 
     def ping(self) -> bool:
-        url = f"{self._base_url}{PortalHTTP.PING}"
-        logger.info(f"Ping portal server: {url}")
-        for i in range(10):
-            try:
-                response = self._client.get(url)
-            except Exception as e:
-                logger.warning(f"Ping portal server failed: {e}, retry {i}")
-                time.sleep(1)
-                continue
-            if response.status_code == 200:
-                return True
-            time.sleep(1)
-        return False
+        return portal_http.ping()
 
     def _set_token(self) -> str:
         res = self._adb.query_content(PortalContent.AUTH_TOKEN)
@@ -124,6 +103,9 @@ class AndroidDevice(DeviceProtocol):
         if self._port:
             hermes_cache.release_portal_port(self._port)
             self._adb.remove_forward_port(self._port)
+        if self._driver:
+            self._driver.close()
+            self._driver = None
 
     def reconnect(self):
         self.disconnect()

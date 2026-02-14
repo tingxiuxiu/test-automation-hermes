@@ -4,13 +4,13 @@ from pathlib import Path
 
 from ..models.language import Language
 from ..models.selector import Selector, SelectorKey, Method
+from ..protocol.selector_to_path_protocol import SelectorToPathProtocol
 
 KEYS = [
     SelectorKey.ID,
     SelectorKey.TEXT,
     SelectorKey.DESCRIPTION,
     SelectorKey.XPATH,
-    # SelectorKey.JSONPATH,
     SelectorKey.CLASS_NAME,
     SelectorKey.TEXT_STARTS_WITH,
     SelectorKey.TEXT_ENDS_WITH,
@@ -24,7 +24,7 @@ KEYS = [
 ]
 
 
-class SelectorParser:
+class SelectorToXpath(SelectorToPathProtocol):
     def __init__(
         self,
         selector: Selector,
@@ -48,7 +48,7 @@ class SelectorParser:
     def get_method(self):
         return self._method
 
-    def get_xpath(self):
+    def get_syntax(self):
         if self._xpath is None:
             raise ValueError("Invalid xpath selector")
         return self._xpath
