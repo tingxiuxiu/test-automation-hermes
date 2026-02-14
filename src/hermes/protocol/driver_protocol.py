@@ -11,9 +11,13 @@ from .component_protocol import ComponentProtocol
 class DriverProtocol(Protocol):
     """驱动协议"""
 
-    def get_page(self, display_id: int) -> str: ...
+    def close(self): ...
 
-    def get_tree(self, display_id: int, timeout: int) -> ElementTree.Element: ...
+    def get_xml_tree(self, display_id: int) -> str: ...
+
+    def get_json_tree(self, display_id: int) -> dict: ...
+
+    def get_xml_element_tree(self, display_id: int) -> ElementTree.Element: ...
 
     def get_window_size(self) -> Size: ...
 
@@ -46,6 +50,7 @@ class DriverProtocol(Protocol):
         target: Selector,
         scrollable: Selector | Bounds,
         *,
+        display_id: int = 0,
         horizontal: bool = False,
         target_combination: Sequence[SelectorKey] | None = None,
         scrollable_combination: Sequence[SelectorKey] | None = None,
@@ -58,6 +63,7 @@ class DriverProtocol(Protocol):
         start: ComponentProtocol | Selector | Point,
         end: ComponentProtocol | Selector | Point,
         *,
+        display_id: int = 0,
         duration: int = 2000,
     ) -> None: ...
 
@@ -66,6 +72,7 @@ class DriverProtocol(Protocol):
         start: ComponentProtocol | Selector | Point,
         end: ComponentProtocol | Selector | Point,
         *,
+        display_id: int = 0,
         duration: int = 2000,
         repeat: int = 1,
         wait_render: int = 500,
@@ -75,6 +82,7 @@ class DriverProtocol(Protocol):
         self,
         target: ComponentProtocol | Selector | Point,
         *,
+        display_id: int = 0,
         scale: float = 0.5,
         duration: int = 500,
         wait_render: int = 500,
@@ -84,9 +92,14 @@ class DriverProtocol(Protocol):
         self,
         target: ComponentProtocol | Selector | Point,
         *,
+        display_id: int = 0,
         scale: float = 0.5,
         duration: int = 500,
         wait_render: int = 500,
     ): ...
 
-    def screenshot(self, path: Path | None = None) -> Path: ...
+    def clear_text(self, display_id: int): ...
+
+    def input_text(self, display_id: int, content: str): ...
+
+    def screenshot(self, path: Path | None = None, display_id: int = 0) -> Path: ...
