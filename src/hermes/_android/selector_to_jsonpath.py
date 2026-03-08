@@ -24,12 +24,28 @@ KEYS = [
 
 
 class SelectorToJsonpath(SelectorToPathProtocol):
+    """
+    Converts a Selector to JSONPath syntax for Android UI element lookup.
+
+    This class implements the SelectorToPathProtocol to generate JSONPath
+    expressions from selector criteria, supporting various matching strategies
+    like exact matches, starts-with, ends-with, contains, and regex matches.
+    """
+
     def __init__(
         self,
         selector: Selector,
         language: Language,
         combination: Sequence[SelectorKey] | None = None,
     ):
+        """
+        Initialize SelectorToJsonpath with selector criteria.
+
+        Args:
+            selector: Selector object containing UI element criteria
+            language: Language for localization
+            combination: Optional sequence of SelectorKey to use in combination
+        """
         self._selector = selector
         self._window = selector.window
         self._language = language
@@ -42,25 +58,70 @@ class SelectorToJsonpath(SelectorToPathProtocol):
         self._process_selector()
 
     def get_window(self):
+        """
+        Get the window associated with the selector.
+
+        Returns:
+            The window object from the selector
+        """
         return self._window
 
     def get_method(self):
+        """
+        Get the method used for element lookup.
+
+        Returns:
+            Method enum value (JSONPATH or IMAGE)
+        """
         return self._method
 
     def get_syntax(self):
+        """
+        Get the generated JSONPath syntax.
+
+        Returns:
+            str: JSONPath expression for element lookup
+
+        Raises:
+            ValueError: If JSONPath selector is invalid
+        """
         if self._jsonpath is None:
             raise ValueError("Invalid jsonpath selector")
         return self._jsonpath
 
     def get_image(self):
+        """
+        Get the image path for image-based lookup.
+
+        Returns:
+            Path: Path to the image file
+
+        Raises:
+            ValueError: If image selector is invalid
+        """
         if self._image is None:
             raise ValueError("Invalid image selector")
         return self._image
 
     def get_threshold(self):
+        """
+        Get the threshold for image matching.
+
+        Returns:
+            float: Threshold value (0.0-1.0)
+        """
         return self._threshold
 
     def _validate_combination(self):
+        """
+        Validate and process the selector combination.
+
+        Returns:
+            dict: Dictionary of valid selector keys and values
+
+        Raises:
+            ValueError: If invalid selector key or no valid selector found
+        """
         inused_selector = {}
         if self._combination is None:
             for key in KEYS:
@@ -83,6 +144,12 @@ class SelectorToJsonpath(SelectorToPathProtocol):
         return inused_selector
 
     def _process_selector(self):
+        """
+        Process the selector to generate JSONPath syntax.
+
+        Raises:
+            ValueError: If invalid selector key or no valid selector found
+        """
         _filters = []
         _base_path = "$[*]"
         if SelectorKey.CLASS_NAME in self._inused_selector:

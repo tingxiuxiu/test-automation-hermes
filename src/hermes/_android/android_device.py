@@ -15,7 +15,32 @@ from .._core.portal_protocol import PortalContent
 
 
 class AndroidDevice(DeviceProtocol):
+    """
+    AndroidDevice class for managing Android device connections and interactions.
+
+    This class provides functionality to connect to Android devices, set up the portal service,
+    and manage device state. It serves as the main interface for interacting with Android devices
+    through the Hermes test automation framework.
+
+    Attributes:
+        _device_model: AndroidDeviceModel - The device model containing device configuration
+        _driver: DriverProtocol | None - The driver for interacting with the device
+        _language: Language - The language setting for the device
+        _adb: AndroidADB - ADB interface for device communication
+        _timeout: int - Default timeout for operations
+        _port: int - Port for portal service communication
+    """
+
     def __init__(self, device_model: AndroidDeviceModel):
+        """
+        Initialize an AndroidDevice instance.
+
+        Args:
+            device_model: AndroidDeviceModel - The device model containing configuration details
+
+        Raises:
+            ValueError: If the device serial is an empty string
+        """
         if device_model.serial == "":
             raise ValueError("serial can not be empty string")
         self._device_model = device_model
@@ -31,15 +56,41 @@ class AndroidDevice(DeviceProtocol):
 
     @property
     def device_model(self) -> AndroidDeviceModel:
+        """
+        Get the device model.
+
+        Returns:
+            AndroidDeviceModel - The device model containing device configuration
+        """
         return self._device_model
 
     def set_language(self, language: Language):
+        """
+        Set the language for the device.
+
+        Args:
+            language: Language - The language to set
+        """
         self._language = language
 
     def set_implicitly_wait(self, timeout: int):
+        """
+        Set the implicit wait timeout for operations.
+
+        Args:
+            timeout: int - The timeout in milliseconds
+        """
         self._timeout = timeout
 
     def connect(self):
+        """
+        Connect to the Android device.
+
+        This method sets up the portal service, verifies the connection, and initializes the driver.
+
+        Raises:
+            ConnectionError: If the portal server is not responsive
+        """
         if self._driver:
             return
         self._setup_portal(self._port)
@@ -56,9 +107,20 @@ class AndroidDevice(DeviceProtocol):
         return
 
     def _check_portal_installed(self) -> bool:
+        """
+        Check if the portal app is installed on the device.
+
+        Returns:
+            bool - True if the portal app is installed, False otherwise
+        """
         return self._adb.get_app_info("com.hermes.portal") is not None
 
     def _install_portal(self):
+        """
+        Install the portal app on the device if it's not already installed.
+
+        This method downloads the portal APK from the configured URL and installs it.
+        """
         if self._check_portal_installed():
             return
         with httpx.Client() as client:
@@ -70,6 +132,15 @@ class AndroidDevice(DeviceProtocol):
             self._adb.install(tmp_file)
 
     def _setup_portal(self, port: int):
+        """
+        Set up the portal service on the device.
+
+        This method installs the portal app if needed, starts it, enables accessibility service,
+        forwards the port, and enables the service.
+
+        Args:
+            port: int - The port to use for portal service communication
+        """
         self._install_portal()
         self._adb.start_app("com.hermes.portal", ".MainActivity")
         for _ in range(10):
@@ -89,9 +160,24 @@ class AndroidDevice(DeviceProtocol):
         portal_http.set_port(port)
 
     def ping(self) -> bool:
+        """
+        Ping the portal server to check if it's responsive.
+
+        Returns:
+            bool - True if the portal server is responsive, False otherwise
+        """
         return portal_http.ping()
 
     def _set_token(self) -> str:
+        """
+        Extract and set the authentication token from the portal service.
+
+        Returns:
+            str - The extracted authentication token
+
+        Raises:
+            ValueError: If no valid token is found
+        """
         res = self._adb.query_content(PortalContent.AUTH_TOKEN)
         pattern = r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
         search_res = re.search(pattern, res)
@@ -100,25 +186,53 @@ class AndroidDevice(DeviceProtocol):
         return search_res.group()
 
     def disconnect(self):
+        """
+        Disconnect from the Android device.
+
+        This method releases the portal port, removes port forwarding, and cleans up the driver.
+        """
         if self._port:
             hermes_cache.release_portal_port(self._port)
             self._adb.remove_forward_port(self._port)
         if self._driver:
-            self._driver.close()
             self._driver = None
 
     def reconnect(self):
+        """
+        Reconnect to the Android device.
+
+        This method disconnects and then reconnects to the device.
+        """
         self.disconnect()
         self.connect()
 
     @property
     def driver(self) -> DriverProtocol:
+        """
+        Get the driver for interacting with the device.
+
+        Returns:
+            DriverProtocol - The driver instance
+
+        Raises:
+            ValueError: If the driver is not initialized
+        """
         if not self._driver:
             raise ValueError("driver is not initialized")
         return self._driver
 
     @property
     def adb(self) -> DebugBridgeProtocol:
+        """
+        Get the ADB interface for device communication.
+
+        Returns:
+            DebugBridgeProtocol - The ADB interface instance
+        """
         return self._adb
 
-    def media_calcualte(self): ...
+    def media_calcualte(self):
+        """
+        Placeholder method for media calculation functionality.
+        """
+        ...

@@ -2,6 +2,7 @@ from loguru import logger
 
 from hermes import new_device
 from hermes.models.device import AndroidDeviceModel
+from hermes.models.component import Point
 
 from hermes.models.selector import Selector, SelectorKey
 
@@ -20,8 +21,8 @@ class TestDriver:
     def test_get_window_size(self):
         """测试获取窗口大小"""
         size = self.d.driver.get_window_size()
-        assert size.width == 1080
-        assert size.height == 2400
+        assert size.width == 1280
+        assert size.height == 2856
 
     def test_get_xml_tree(self):
         """测试获取页面"""
@@ -34,6 +35,10 @@ class TestDriver:
         tree = self.d.driver.get_json_tree(0)
         logger.info(tree)
         assert tree is not None
+
+    def test_swipe(self):
+        """测试滑动"""
+        self.d.driver.swipe(Point(x=500, y=2465), Point(x=500, y=2000))
 
     def test_tap_with_selector(self):
         """测试点击元素"""
@@ -51,10 +56,10 @@ class TestDriver:
         element = self.d.driver.locator(selector)
         assert element is not None
         self.d.driver.tap(element.get_center())
-        selector = Selector(text="Apps")
+        selector = Selector(text="Wallpaper & style")
         element = self.d.driver.locator(selector)
         assert element is not None
-        assert element.get_text() == "Apps"
+        assert element.get_text() == "Wallpaper & style"
 
     def test_tap_with_component(self):
         """测试点击组件"""

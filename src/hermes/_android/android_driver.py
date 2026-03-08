@@ -1,6 +1,4 @@
 import time
-import json
-import threading
 
 import elementpath
 from xml.etree import ElementTree
@@ -27,6 +25,27 @@ from .selector_to_jsonpath import SelectorToJsonpath
 
 
 class AndroidDriver(DriverProtocol):
+    """
+    AndroidDriver class for interacting with Android devices through various protocols.
+
+    This class provides methods for locating elements, performing actions, and interacting
+    with Android devices using both XPath and JSONPath locator engines.
+
+    Attributes:
+        _adb: DebugBridgeProtocol instance for ADB operations
+        _tag: Device tag for identification
+        _language: Language for localization
+        _timeout: Default timeout for operations in milliseconds
+        _window_size: Cached window size
+        _token: Authentication token for API calls
+        _locator_engine: Selected locator engine (XPath or JSONPath)
+        _locator_engine_type: Type of locator engine
+        _headers: HTTP headers for API calls
+        _latest_page_id: Latest page state ID for stability checking
+        _cached_xml: Cached XML hierarchies by page ID
+        _cached_json: Cached JSON hierarchies by page ID
+    """
+
     def __init__(
         self,
         adb: DebugBridgeProtocol,
@@ -36,6 +55,17 @@ class AndroidDriver(DriverProtocol):
         locator_engine: LocatorEngine,
         timeout: int = 8000,
     ):
+        """
+        Initialize the AndroidDriver.
+
+        Args:
+            adb: DebugBridgeProtocol instance for ADB operations
+            tag: Device tag for identification
+            token: Authentication token for API calls
+            language: Language for localization
+            locator_engine: Locator engine to use (XPath or JSONPath)
+            timeout: Default timeout for operations in milliseconds (default: 8000)
+        """
         self._adb = adb
         self._tag = tag
         self._language = language
@@ -52,45 +82,58 @@ class AndroidDriver(DriverProtocol):
         self._latest_page_id = -1
         self._cached_xml: dict[int, ElementTree.Element] = dict()
         self._cached_json: dict[int, dict] = dict()
-        self._timer = threading.Timer(10, self._clear_cache)
-        self._timer.start()
-        self._clear_lock = threading.Lock()
-
-    def close(self):
-        with self._clear_lock:
-            self._timer.cancel()
-
-    def _clear_cache(self):
-        with self._clear_lock:
-            logger.debug("Clear cache")
-            for k in self._cached_xml.keys():
-                if k != self._latest_page_id:
-                    del self._cached_xml[k]
-            for k in self._cached_json.keys():
-                if k != self._latest_page_id:
-                    del self._cached_json[k]
-            self._timer = threading.Timer(10, self._clear_cache)
-            self._timer.start()
 
     def get_window_size(self, refresh: bool = False) -> Size:
+        """
+        Get the window size of the device.
+
+        Args:
+            refresh: If True, refresh the cached window size (default: False)
+
+        Returns:
+            Size: Window size object with width and height
+        """
         if refresh or not self._window_size:
             _size = self._adb.get_window_size()
             self._window_size = _size
         return self._window_size
 
     def get_xml_tree(self, display_id: int) -> str:
+        """
+        Get the XML hierarchy of the current screen.
+
+        Args:
+            display_id: Display ID to get the hierarchy for
+
+        Returns:
+            str: XML text representation of the screen hierarchy
+        """
         xml_text = portal_http.get_hierarchy(display_id, "xml")
         return xml_text
 
     def get_json_tree(self, display_id: int) -> dict:
+        """
+        Get the JSON hierarchy of the current screen.
+
+        Args:
+            display_id: Display ID to get the hierarchy for
+
+        Returns:
+            dict: JSON representation of the screen hierarchy
+        """
         json_obj = portal_http.get_hierarchy(display_id, "json")
         return json_obj
 
     def _wait_stable(self):
+        """
+        Wait for the screen to stabilize by checking page state ID.
+
+        Returns:
+            int: Latest page state ID
+        """
         start = time.time()
         while time.time() - start < 2:
             current_page_id = portal_http.get_state_id()
-
             if current_page_id == self._latest_page_id:
                 break
             self._latest_page_id = current_page_id
@@ -98,17 +141,42 @@ class AndroidDriver(DriverProtocol):
         return self._latest_page_id
 
     def get_xml_element_tree(self, display_id: int) -> ElementTree.Element:
+        """
+        Get the XML element tree of the current screen.
+
+        Args:
+            display_id: Display ID to get the element tree for
+
+        Returns:
+            ElementTree.Element: XML element tree of the screen
+        """
         self._wait_stable()
-        if self._latest_page_id in self._cached_xml:
-            return self._cached_xml[self._latest_page_id]
+        if n := self._cached_xml.get(self._latest_page_id):
+            return n
         else:
             xml_text = portal_http.get_hierarchy(display_id, "xml")
-            self._cached_xml[self._latest_page_id] = ElementTree.XML(xml_text)
-            return self._cached_xml[self._latest_page_id]
+            xml_tree = ElementTree.XML(xml_text)
+            self._cached_xml = {self._latest_page_id: xml_tree}
+            return xml_tree
 
     def _find_nodes_by_xpath(
         self, xpath: str, visible: bool, window: Window, timeout: int
     ) -> Sequence[ElementTree.Element]:
+        """
+        Find nodes matching the given XPath expression.
+
+        Args:
+            xpath: XPath expression to match
+            visible: Whether to only return visible elements
+            window: Window to search in
+            timeout: Timeout in milliseconds
+
+        Returns:
+            Sequence[ElementTree.Element]: List of matching elements
+
+        Raises:
+            TimeoutError: If no elements found within timeout
+        """
         logger.debug(f"Find nodes by xpath: {xpath}")
         start_time = time.time()
         while time.time() - start_time < int(timeout / 1000):
@@ -129,6 +197,21 @@ class AndroidDriver(DriverProtocol):
         visible: bool,
         timeout: int,
     ) -> Sequence[ImageModal]:
+        """
+        Match an image template on the screen.
+
+        Args:
+            image: Path to the image template
+            threshold: Confidence threshold for matching
+            visible: Whether to only return visible matches
+            timeout: Timeout in milliseconds
+
+        Returns:
+            Sequence[ImageModal]: List of matching image modals
+
+        Raises:
+            TimeoutError: If no matches found within timeout
+        """
         tragets = []
         index = 0
         start_time = time.time()
@@ -169,12 +252,18 @@ class AndroidDriver(DriverProtocol):
                     return tragets
         raise TimeoutError("Match image timeout")
 
-    def tap(self, target: ComponentProtocol | Selector | Point, wait_render: int = 500):
+    def tap(
+        self, target: ComponentProtocol | Selector | Point, wait_render: int = 1000
+    ):
         """
-        点击目标元素
+        Tap on the target element.
 
-        :param target: 目标元素，支持组件、选择器、坐标
-        :param wait_render: 等待渲染时间，默认500ms
+        Args:
+            target: Target element, supports ComponentProtocol, Selector, or Point
+            wait_render: Wait time after tap in milliseconds (default: 1000)
+
+        Raises:
+            ValueError: If target type is invalid
         """
         if isinstance(target, AndroidComponent):
             target.tap()
@@ -192,14 +281,18 @@ class AndroidDriver(DriverProtocol):
         self,
         target: ComponentProtocol | Selector | Point,
         duration: int = 1500,
-        wait_render: int = 500,
+        wait_render: int = 1000,
     ):
         """
-        长按目标元素
+        Long press on the target element.
 
-        :param target: 目标元素，支持组件、选择器、坐标
-        :param duration: 长按时间，默认1500ms
-        :param wait_render: 等待渲染时间，默认500ms
+        Args:
+            target: Target element, supports ComponentProtocol, Selector, or Point
+            duration: Long press duration in milliseconds (default: 1500)
+            wait_render: Wait time after press in milliseconds (default: 1000)
+
+        Raises:
+            ValueError: If target type is invalid
         """
         if isinstance(target, AndroidComponent):
             target.long_press(duration)
@@ -222,6 +315,22 @@ class AndroidDriver(DriverProtocol):
         language: Language | None = None,
         timeout: int | None = None,
     ) -> ComponentProtocol | None:
+        """
+        Locate a component using the given selector.
+
+        Args:
+            selector: Selector to use for locating the component
+            visible: Whether to only return visible elements (default: True)
+            combination: Sequence of SelectorKey for combination (default: None)
+            language: Language for localization (default: self._language)
+            timeout: Timeout in milliseconds (default: self._timeout)
+
+        Returns:
+            ComponentProtocol | None: Located component or None if not found
+
+        Raises:
+            NotImplementedError: If locator engine is not implemented
+        """
         if language is None:
             language = self._language
         _engine = self._locator_engine(selector, language, combination)
@@ -274,6 +383,22 @@ class AndroidDriver(DriverProtocol):
         language: Language | None = None,
         timeout: int | None = None,
     ) -> Sequence[ComponentProtocol]:
+        """
+        Locate multiple components using the given selector.
+
+        Args:
+            selector: Selector to use for locating components
+            visible: Whether to only return visible elements (default: True)
+            combination: Sequence of SelectorKey for combination (default: None)
+            language: Language for localization (default: self._language)
+            timeout: Timeout in milliseconds (default: self._timeout)
+
+        Returns:
+            Sequence[ComponentProtocol]: List of located components
+
+        Raises:
+            NotImplementedError: If locator engine is not implemented
+        """
         if language is None:
             language = self._language
         _engine = self._locator_engine(selector, language, combination)
@@ -335,6 +460,22 @@ class AndroidDriver(DriverProtocol):
         target_language: Language | None = None,
         scrollable_language: Language | None = None,
     ) -> ComponentProtocol | None:
+        """
+        Scroll to bring the target element into view.
+
+        Args:
+            target: Selector for the target element
+            scrollable: Selector or Bounds for the scrollable area
+            display_id: Display ID (default: 0)
+            horizontal: Whether to scroll horizontally (default: False)
+            target_combination: SelectorKey sequence for target (default: None)
+            scrollable_combination: SelectorKey sequence for scrollable (default: None)
+            target_language: Language for target localization (default: self._language)
+            scrollable_language: Language for scrollable localization (default: self._language)
+
+        Returns:
+            ComponentProtocol | None: Located target component or None if not found
+        """
         if target_language is None:
             target_language = self._language
         if scrollable_language is None:
@@ -465,6 +606,15 @@ class AndroidDriver(DriverProtocol):
         display_id: int = 0,
         duration: int = 2000,
     ) -> None:
+        """
+        Drag and drop from start to end point.
+
+        Args:
+            start: Start point, supports ComponentProtocol, Selector, or Point
+            end: End point, supports ComponentProtocol, Selector, or Point
+            display_id: Display ID (default: 0)
+            duration: Drag duration in milliseconds (default: 2000)
+        """
         if isinstance(start, Point):
             _start = start
         elif isinstance(start, Selector):
@@ -492,10 +642,21 @@ class AndroidDriver(DriverProtocol):
         end: ComponentProtocol | Selector | Point,
         *,
         display_id: int = 0,
-        duration: int = 2000,
+        duration: int = 1000,
         repeat: int = 1,
-        wait_render: int = 500,
+        wait_render: int = 1000,
     ) -> None:
+        """
+        Swipe from start to end point.
+
+        Args:
+            start: Start point, supports ComponentProtocol, Selector, or Point
+            end: End point, supports ComponentProtocol, Selector, or Point
+            display_id: Display ID (default: 0)
+            duration: Swipe duration in milliseconds (default: 1000)
+            repeat: Number of times to repeat the swipe (default: 1)
+            wait_render: Wait time after swipe in milliseconds (default: 1000)
+        """
         if isinstance(start, Point):
             _start = start
         elif isinstance(start, Selector):
@@ -528,6 +689,16 @@ class AndroidDriver(DriverProtocol):
         duration: int = 500,
         wait_render: int = 500,
     ):
+        """
+        Zoom in at the target point.
+
+        Args:
+            target: Target point, supports ComponentProtocol, Selector, or Point
+            display_id: Display ID (default: 0)
+            scale: Zoom scale (default: 0.5)
+            duration: Zoom duration in milliseconds (default: 500)
+            wait_render: Wait time after zoom in milliseconds (default: 500)
+        """
         if isinstance(target, Point):
             _target = target
         elif isinstance(target, Selector):
@@ -560,6 +731,16 @@ class AndroidDriver(DriverProtocol):
         duration: int = 200,
         wait_render: int = 500,
     ):
+        """
+        Zoom out at the target point.
+
+        Args:
+            target: Target point, supports ComponentProtocol, Selector, or Point
+            display_id: Display ID (default: 0)
+            scale: Zoom scale (default: 0.5)
+            duration: Zoom duration in milliseconds (default: 200)
+            wait_render: Wait time after zoom in milliseconds (default: 500)
+        """
         if isinstance(target, Point):
             _target = target
         elif isinstance(target, Selector):
@@ -584,12 +765,35 @@ class AndroidDriver(DriverProtocol):
         time.sleep(wait_render / 1000)
 
     def clear_text(self, display_id: int):
+        """
+        Clear text on the screen.
+
+        Args:
+            display_id: Display ID
+        """
         portal_http.action_clear_text(display_id)
 
     def input_text(self, display_id: int, content: str):
+        """
+        Input text on the screen.
+
+        Args:
+            display_id: Display ID
+            content: Text to input
+        """
         portal_http.action_input_text(display_id, content)
 
     def screenshot(self, path: Path | None = None, display_id: int = 0) -> Path:
+        """
+        Capture a screenshot of the screen.
+
+        Args:
+            path: Path to save the screenshot (default: auto-generated path)
+            display_id: Display ID (default: 0)
+
+        Returns:
+            Path: Path to the saved screenshot
+        """
         if path is None:
             path = (
                 config.CACHE_DIR

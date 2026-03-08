@@ -9,7 +9,7 @@ class DeviceListener:
     ):
         for tag, device in hermes_cache.get_devices():
             try:
-                if not device.check_driver():
+                if not device.ping():
                     device.connect()
                 else:
                     device.reconnect()
