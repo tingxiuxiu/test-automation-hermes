@@ -13,7 +13,7 @@
       "type": "debugpy",
       "request": "launch",
       "program": "pytest",
-      "args": ["${file}"],
+      "args": ["-sv", "${file}"],
       "console": "integratedTerminal"
     }
   ]

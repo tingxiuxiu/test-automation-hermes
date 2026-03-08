@@ -1,68 +1,82 @@
+import time
+
 from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
-import httpx
 import elementpath
 import cv2
 
 from xml.etree import ElementTree
 
 from ..models.language import Language
-from .._core import config
+from .._core import config, portal_http
 from .._core.portal_protocol import PortalHTTP
 from ..protocol.component_protocol import ComponentProtocol
 from ..protocol.debug_bridge_protocol import DebugBridgeProtocol
+from ..models.device import LocatorEngine
 from ..models.component import Bounds, Point, Size
-from ..models.selector import Window, Selector, SelectorKey
-from .selector_paser import SelectorParser, Method
+from ..models.selector import Window, Selector, SelectorKey, Method
+from .selector_to_jsonpath import SelectorToJsonpath
+from .selector_to_xpath import SelectorToXpath
 
 
 class AndroidComponent(ComponentProtocol):
+    """
+    Represents an Android UI component with methods to interact with it.
+
+    This class provides functionality to interact with Android UI components, including
+    tapping, long-pressing, locating child components, and retrieving component properties.
+
+    Attributes:
+        _parent_syntax: Parent syntax of the component
+        _locator_engine: Locator engine used for finding components
+        _locator_engine_type: Type of locator engine (XPATH or JSONPATH)
+        _token: Token for the component
+        _tag: Tag for the component
+        _adb: ADB interface for device communication
+        _language: Language setting for the component
+        _window: Window containing the component
+        _timeout: Timeout for component operations
+        _node: XML element representing the component
+        _bounds: Bounds of the component
+        _size: Size of the component
+        _center: Center point of the component
+    """
+
     def __init__(
         self,
         node: ElementTree.Element,
-        base_xpath: str,
-        base_url: str,
+        parent_syntax: str,
+        locator_engine: LocatorEngine,
         token: str,
         tag: str,
         adb: DebugBridgeProtocol,
-        client: httpx.Client,
         language: Language,
         timeout: int,
         window: Window,
     ):
         """
-        node: attribute of the component
-            index: index of the component
-            text: text of the component
-            resource-id: resource-id of the component
-            class: class of the component
-            package: package of the component
-            content-desc: content-desc of the component
-            checkable: checkable of the component
-            checked: checked of the component
-            clickable: clickable of the component
-            enabled: enabled of the component
-            focusable: focusable of the component
-            focused: focused of the component
-            scrollable: scrollable of the component
-            long-clickable: long-clickable of the component
-            password: password of the component
-            selected: selected of the component
-            drawing-order: drawing-order of the component
-            bounds: bounds of the component "0,0,0,0"
-        base_xpath: base xpath of the component
-        base_url: base url of the component
-        token: token of the component
-        tag: tag of the component
-        client: client of the component
-        language: language of the component
-        timeout: timeout of the component
-        window: window of the component
+        Initialize an AndroidComponent instance.
+
+        Args:
+            node: XML element representing the component with attributes like text, resource-id, class, etc.
+            parent_syntax: Parent syntax of the component
+            locator_engine: Locator engine to use (XPATH or JSONPATH)
+            token: Token for the component
+            tag: Tag for the component
+            adb: ADB interface for device communication
+            language: Language setting for the component
+            timeout: Timeout for component operations
+            window: Window containing the component
         """
-        self._base_url = base_url
-        self._base_xpath = base_xpath
+        self._parent_syntax = parent_syntax
+        self._locator_engine = (
+            SelectorToXpath
+            if locator_engine == LocatorEngine.XPATH
+            else SelectorToJsonpath
+        )
+        self._locator_engine_type = locator_engine
         self._token = token
         self._tag = tag
         self._adb = adb
@@ -70,7 +84,6 @@ class AndroidComponent(ComponentProtocol):
         self._window = window
         self._timeout = timeout
         self._node = node
-        self._client = client
         self._bounds = self._convert_bounds()
         self._size = Size(
             width=self._bounds.right - self._bounds.left,
@@ -82,6 +95,12 @@ class AndroidComponent(ComponentProtocol):
         )
 
     def _convert_bounds(self) -> Bounds:
+        """
+        Convert the bounds string from the component to a Bounds object.
+
+        Returns:
+            Bounds: A Bounds object representing the component's boundaries
+        """
         _bounds = self._node.get("bounds", "0,0,0,0")
         left, top, right, bottom = _bounds.split(",")
         return Bounds(
@@ -92,47 +111,81 @@ class AndroidComponent(ComponentProtocol):
         )
 
     def get_window(self) -> Window | None:
+        """
+        Get the window containing the component.
+
+        Returns:
+            Window | None: The window containing the component, or None if not available
+        """
         return self._window
 
     def get_text(self) -> str | None:
+        """
+        Get the text of the component.
+
+        Returns:
+            str | None: The text of the component, or None if not available
+        """
         return self._node.get("text")
 
     def get_description(self) -> str | None:
+        """
+        Get the content description of the component.
+
+        Returns:
+            str | None: The content description of the component, or None if not available
+        """
         return self._node.get("content-desc")
 
     def get_size(self) -> Size:
+        """
+        Get the size of the component.
+
+        Returns:
+            Size: The size of the component
+        """
         return self._size
 
     def get_center(self) -> Point:
+        """
+        Get the center point of the component.
+
+        Returns:
+            Point: The center point of the component
+        """
         return self._center
 
     def get_bounds(self) -> Bounds:
+        """
+        Get the bounds of the component.
+
+        Returns:
+            Bounds: The bounds of the component
+        """
         return self._bounds
 
-    def clear(self):
-        response = self._client.post(
-            f"{self._base_url}{PortalHTTP.INPUT_CLEAR}",
-            json={
-                "displayId": self._window.display_id,
-            },
+    def tap(self, wait_render: int = 1000):
+        """
+        Tap on the component.
+
+        Args:
+            wait_render: Time to wait after tapping (in milliseconds)
+        """
+        portal_http.action_tap(self._window.display_id, self._center)
+        time.sleep(wait_render / 1000)
+
+    def long_press(self, duration: int = 2000, wait_render: int = 1000):
+        """
+        Long press on the component.
+
+        Args:
+            duration: Duration of the long press (in milliseconds)
+            wait_render: Time to wait after long pressing (in milliseconds)
+        """
+        portal_http.action_long_press(
+            self._window.display_id, self._center, duration=duration
         )
-        response.raise_for_status()
-
-    def input(self, text: str):
-        response = self._client.post(
-            f"{self._base_url}{PortalHTTP.INPUT_TEXT}",
-            json={
-                "displayId": self._window.display_id,
-                "text": text,
-            },
-        )
-        response.raise_for_status()
-
-    def tap(self):
-        self._adb.tap(self._center.x, self._center.y)
-
-    def long_press(self, duration: int = 2000):
-        self._adb.long_press(self._center.x, self._center.y, duration=duration)
+        time.sleep(wait_render / 1000)
 
     def locator(
         self,
@@ -141,26 +194,44 @@ class AndroidComponent(ComponentProtocol):
         combination: Sequence[SelectorKey] | None = None,
         language: Language | None = None,
     ) -> "AndroidComponent":
+        """
+        Find a single child component matching the selector.
+
+        Args:
+            selector: Selector to match the component
+            combination: Optional sequence of selector keys to combine
+            language: Optional language setting for the selector
+
+        Returns:
+            AndroidComponent: The first matching component
+
+        Raises:
+            NotImplementedError: If the locator method is not implemented
+            ValueError: If no elements match the selector
+        """
         if language is None:
             language = self._language
-        parser = SelectorParser(selector, language, combination)
-        if parser.get_method() == Method.IMAGE:
+        _engine = self._locator_engine(selector, language, combination)
+        if _engine.get_method() == Method.IMAGE:
             raise NotImplementedError("Image is not implemented")
-        else:
-            elements = elementpath.select(self._node, parser.get_xpath())
+        elif _engine.get_method() == Method.XPATH:
+            elements = elementpath.select(self._node, _engine.get_syntax())
             if not elements:
-                raise ValueError("Invalid xpath selector")
+                raise ValueError(f"Invalid {_engine.get_method().value} selector")
             return AndroidComponent(
                 node=elements[0],
-                base_xpath=self._base_xpath,
-                base_url=self._base_url,
+                parent_syntax=self._parent_syntax,
+                locator_engine=self._locator_engine_type,
                 token=self._token,
                 tag=self._tag,
                 adb=self._adb,
-                client=self._client,
                 language=language,
                 timeout=self._timeout,
                 window=self._window,
+            )
+        else:
+            raise NotImplementedError(
+                f"Locator engine {_engine.get_method().value} is not implemented"
             )
 
     def locators(
@@ -170,30 +241,48 @@ class AndroidComponent(ComponentProtocol):
         combination: Sequence[SelectorKey] | None = None,
         language: Language | None = None,
     ) -> Sequence["AndroidComponent"]:
+        """
+        Find all child components matching the selector.
+
+        Args:
+            selector: Selector to match the components
+            combination: Optional sequence of selector keys to combine
+            language: Optional language setting for the selector
+
+        Returns:
+            Sequence[AndroidComponent]: All matching components
+
+        Raises:
+            NotImplementedError: If the locator method is not implemented
+            ValueError: If no elements match the selector
+        """
         if language is None:
             language = self._language
-        parser = SelectorParser(selector, language, combination)
-        if parser.get_method() == Method.IMAGE:
+        _engine = self._locator_engine(selector, language, combination)
+        if _engine.get_method() == Method.IMAGE:
             raise NotImplementedError("Image is not implemented")
-        else:
-            elements = elementpath.select(self._node, parser.get_xpath())
+        elif _engine.get_method() == Method.XPATH:
+            elements = elementpath.select(self._node, _engine.get_syntax())
             if not elements:
-                raise ValueError("Invalid xpath selector")
+                raise ValueError(f"Invalid {_engine.get_method().value} selector")
             return [
                 AndroidComponent(
                     node=ele,
-                    base_xpath=self._base_xpath,
-                    base_url=self._base_url,
+                    parent_syntax=self._parent_syntax,
+                    locator_engine=self._locator_engine_type,
                     token=self._token,
                     tag=self._tag,
                     adb=self._adb,
-                    client=self._client,
                     language=language,
                     timeout=self._timeout,
                     window=self._window,
                 )
                 for ele in elements
             ]
+        else:
+            raise NotImplementedError(
+                f"Locator engine {_engine.get_method().value} is not implemented"
+            )
 
     def child(
         self,
@@ -202,55 +291,109 @@ class AndroidComponent(ComponentProtocol):
         combination: Sequence[SelectorKey] | None = None,
         language: Language | None = None,
     ) -> Sequence["AndroidComponent"]:
+        """
+        Find child components matching the selector.
+
+        Args:
+            selector: Selector to match the components
+            combination: Optional sequence of selector keys to combine
+            language: Optional language setting for the selector
+
+        Returns:
+            Sequence[AndroidComponent]: All matching child components
+
+        Raises:
+            NotImplementedError: If the locator method is not implemented
+            ValueError: If no elements match the selector
+        """
         if language is None:
             language = self._language
-        parser = SelectorParser(selector, language, combination)
-        if parser.get_method() == Method.IMAGE:
+        _engine = self._locator_engine(selector, language, combination)
+        if _engine.get_method() == Method.IMAGE:
             raise NotImplementedError("Image is not implemented")
-        elements = elementpath.select(self._node, parser.get_xpath())
-        if not elements:
-            raise ValueError("Invalid xpath selector")
-        return [
-            AndroidComponent(
-                node=ele,
-                base_xpath=self._base_xpath,
-                base_url=self._base_url,
-                token=self._token,
-                tag=self._tag,
-                adb=self._adb,
-                client=self._client,
-                language=language,
-                timeout=self._timeout,
-                window=self._window,
+        elif _engine.get_method() == Method.XPATH:
+            elements = elementpath.select(self._node, _engine.get_syntax())
+            if not elements:
+                raise ValueError(f"Invalid {_engine.get_method().value} selector")
+            return [
+                AndroidComponent(
+                    node=ele,
+                    parent_syntax=self._parent_syntax,
+                    locator_engine=self._locator_engine_type,
+                    token=self._token,
+                    tag=self._tag,
+                    adb=self._adb,
+                    language=language,
+                    timeout=self._timeout,
+                    window=self._window,
+                )
+                for ele in elements
+            ]
+        else:
+            raise NotImplementedError(
+                f"Locator engine {_engine.get_method().value} is not implemented"
             )
-            for ele in elements
-        ]
 
     def get_attribute(self, name: str) -> str | None:
+        """
+        Get an attribute of the component.
+
+        Args:
+            name: Name of the attribute to retrieve
+
+        Returns:
+            str | None: The value of the attribute, or None if not available
+        """
         return self._node.get(name)
 
     def is_visible(self) -> bool:
+        """
+        Check if the component is visible.
+
+        Returns:
+            bool: True if the component is visible, False otherwise
+        """
         return self._node.get("visible", "") == "true"
 
     def is_selected(self) -> bool:
+        """
+        Check if the component is selected.
+
+        Returns:
+            bool: True if the component is selected, False otherwise
+        """
         return self._node.get("selected", "") == "true"
 
     def is_enabled(self) -> bool:
+        """
+        Check if the component is enabled.
+
+        Returns:
+            bool: True if the component is enabled, False otherwise
+        """
         return self._node.get("enabled", "") == "true"
 
-    def is_checked(self) -> bool:
-        return self._node.get("checked", "") == "true"
+    def screenshot(self, path: Path | None = None) -> Path:
+        """
+        Take a screenshot of the component.
 
-    def screenshot(self, path: Path | None = None, display_id: int = 0) -> Path:
+        Args:
+            path: Optional path to save the screenshot
+
+        Returns:
+            Path: Path to the saved screenshot
+
+        Raises:
+            ValueError: If the screenshot cannot be read or cropped
+        """
         if path is None:
             path = (
                 config.CACHE_DIR
                 / f"{self._tag}-{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}-screenshot.png"
             )
-        res = self._client.get(f"{self._base_url}{PortalHTTP.SCREENSHOT}/{display_id}")
-        if res.status_code == 200:
-            with open(path, "wb") as f:
-                f.write(res.content)
+        content = portal_http.get_capture(self._window.display_id)
+        with open(path, "wb") as f:
+            f.write(content)
         img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
         if img is None:
             raise ValueError("Failed to read screenshot")

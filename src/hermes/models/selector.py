@@ -27,6 +27,7 @@ class SelectorKey(Enum):
 
 class Method(Enum):
     XPATH = "xpath"
+    JSONPATH = "jsonpath"
     IMAGE = "image"
 
 

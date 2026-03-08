@@ -8,8 +8,8 @@
 
 from pathlib import Path
 
-from hermes._media.image_calc import compare_similarity
-from hermes.models.selector import SimilarityAlgorithm
+from hermes._media.image_calculate import compare_similarity
+from hermes.models.media import SimilarityAlgorithm
 
 
 def test_histogram_comparison():

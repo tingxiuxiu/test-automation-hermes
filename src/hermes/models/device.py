@@ -12,6 +12,11 @@ class PlatformName(Enum):
     HARMONY = "harmony"
 
 
+class LocatorEngine(Enum):
+    XPATH = "xpath"
+    JSONPATH = "jsonpath"
+
+
 class BaseDeviceModel(BaseModel):
     serial: str
     language: Language = Language.CHINESE
@@ -21,6 +26,7 @@ class BaseDeviceModel(BaseModel):
 
 class AndroidDeviceModel(BaseDeviceModel):
     platform_name: PlatformName = PlatformName.ANDROID
+    locator_engine: LocatorEngine = LocatorEngine.XPATH
     app_package: str | None = None
     app_activity: str | None = None
     android_home: str | None = None

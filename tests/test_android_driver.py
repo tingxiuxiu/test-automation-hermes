@@ -1,10 +1,10 @@
-from hermes import new_device
-from hermes.models.device import AndroidDeviceModel
 from loguru import logger
 
-from hermes.models.language import Language
-from hermes.models.selector import Selector, SelectorKey
+from hermes import new_device
+from hermes.models.device import AndroidDeviceModel
 from hermes.models.component import Point
+
+from hermes.models.selector import Selector, SelectorKey
 
 
 class TestDriver:
@@ -21,25 +21,30 @@ class TestDriver:
     def test_get_window_size(self):
         """测试获取窗口大小"""
         size = self.d.driver.get_window_size()
-        assert size.width == 1080
-        assert size.height == 2400
+        assert size.width == 1280
+        assert size.height == 2856
 
-    def test_get_page(self):
+    def test_get_xml_tree(self):
         """测试获取页面"""
-        page = self.d.driver.get_page(0)
+        page = self.d.driver.get_xml_tree(0)
+        logger.info(page)
         assert "Battery" in page
 
-    def test_get_tree(self):
+    def test_get_json_tree(self):
         """测试获取界面树"""
-        tree = self.d.driver.get_tree(0, 5000)
+        tree = self.d.driver.get_json_tree(0)
+        logger.info(tree)
         assert tree is not None
+
+    def test_swipe(self):
+        """测试滑动"""
+        self.d.driver.swipe(Point(x=500, y=2465), Point(x=500, y=2000))
 
     def test_tap_with_selector(self):
         """测试点击元素"""
         # 189, 1683, 357, 1754
         selector = Selector(text="Battery")
         self.d.driver.tap(selector)
-        logger.info(self.d.driver.get_page(0))
         selector = Selector(text="Battery usage")
         element = self.d.driver.locator(selector)
         assert element is not None
@@ -51,10 +56,10 @@ class TestDriver:
         element = self.d.driver.locator(selector)
         assert element is not None
         self.d.driver.tap(element.get_center())
-        selector = Selector(text="Apps")
+        selector = Selector(text="Wallpaper & style")
         element = self.d.driver.locator(selector)
         assert element is not None
-        assert element.get_text() == "Apps"
+        assert element.get_text() == "Wallpaper & style"
 
     def test_tap_with_component(self):
         """测试点击组件"""

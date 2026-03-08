@@ -5,7 +5,16 @@ description = "Test automation framework"
 authors = [
     {name = "xin.zhang", email = "112859811@qq.com"},
 ]
-dependencies = ["pydantic>=2.12.5", "pydantic-settings>=2.12.0", "loguru>=0.7.3", "pytest>=9.0.2", "httpx>=0.28.1", "elementpath>=5.1.1", "opencv-python>=4.13.0.90", "numpy>=1.24.0"]
+dependencies = [
+    "pydantic>=2.12.5",
+    "pydantic-settings>=2.12.0",
+    "loguru>=0.7.3",
+    "pytest>=9.0.2", 
+    "httpx>=0.28.1", 
+    "elementpath>=5.1.1", 
+    "opencv-python>=4.13.0.90", 
+    "numpy>=1.24.0",
+]
 requires-python = ">=3.12"
 readme = "README.md"
 license = {text = "MIT"}

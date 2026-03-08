@@ -8,7 +8,7 @@
 
 from pathlib import Path
 
-from hermes._media.image_calc import MatchMethod, find_all_templates
+from hermes._media.image_calculate import MatchMethod, find_all_templates
 
 
 def test_template_matching():
